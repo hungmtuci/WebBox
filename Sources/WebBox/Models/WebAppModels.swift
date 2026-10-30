@@ -285,12 +285,45 @@ struct GlobalWorkspacePreferences: Codable {
     var autoHibernateMinutes: Int = 0 // 0 = Tắt ngủ đông tự động
     var confirmBeforeClosingModifiedForms: Bool = false
     var enableDeveloperExtras: Bool = true
+    var isSidebarVisible: Bool = true
+    var isSidebarCompact: Bool = false
     var showAccountLabelsInSidebar: Bool = true
     var dedicatedAppsInstallDirectory: String = {
         let homeApps = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications", isDirectory: true).path
         return homeApps
     }()
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case defaultLinkRoutingMode
+        case inAppBrowserLayout
+        case globalDoNotDisturb
+        case autoHibernateMinutes
+        case confirmBeforeClosingModifiedForms
+        case enableDeveloperExtras
+        case isSidebarVisible
+        case isSidebarCompact
+        case showAccountLabelsInSidebar
+        case dedicatedAppsInstallDirectory
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        defaultLinkRoutingMode = try c.decodeIfPresent(LinkRoutingMode.self, forKey: .defaultLinkRoutingMode) ?? .askEveryTime
+        inAppBrowserLayout = try c.decodeIfPresent(InAppBrowserLayoutMode.self, forKey: .inAppBrowserLayout) ?? .splitRight
+        globalDoNotDisturb = try c.decodeIfPresent(Bool.self, forKey: .globalDoNotDisturb) ?? false
+        autoHibernateMinutes = try c.decodeIfPresent(Int.self, forKey: .autoHibernateMinutes) ?? 0
+        confirmBeforeClosingModifiedForms = try c.decodeIfPresent(Bool.self, forKey: .confirmBeforeClosingModifiedForms) ?? false
+        enableDeveloperExtras = try c.decodeIfPresent(Bool.self, forKey: .enableDeveloperExtras) ?? true
+        isSidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .isSidebarVisible) ?? true
+        isSidebarCompact = try c.decodeIfPresent(Bool.self, forKey: .isSidebarCompact) ?? false
+        showAccountLabelsInSidebar = try c.decodeIfPresent(Bool.self, forKey: .showAccountLabelsInSidebar) ?? true
+        let defaultDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Applications", isDirectory: true).path
+        dedicatedAppsInstallDirectory = try c.decodeIfPresent(String.self, forKey: .dedicatedAppsInstallDirectory) ?? defaultDir
+    }
 }
 
 // MARK: - Runtime Link Prompt, In-App Browser Tab & Downloads

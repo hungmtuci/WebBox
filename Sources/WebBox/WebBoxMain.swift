@@ -326,6 +326,32 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         if !store.isStandaloneMode {
             viewMenu.addItem(.separator())
+
+            let toggleSidebarItem = viewMenu.addItem(
+                withTitle: "Ẩn / Hiện menu bên trái",
+                action: #selector(toggleLeftSidebarAction),
+                keyEquivalent: "\\"
+            )
+            toggleSidebarItem.keyEquivalentModifierMask = [.command]
+            toggleSidebarItem.target = self
+
+            let toggleSidebarAltItem = viewMenu.addItem(
+                withTitle: "Ẩn / Hiện menu bên trái (Phím tắt phụ)",
+                action: #selector(toggleLeftSidebarAction),
+                keyEquivalent: "s"
+            )
+            toggleSidebarAltItem.keyEquivalentModifierMask = [.command, .shift]
+            toggleSidebarAltItem.target = self
+
+            let compactSidebarItem = viewMenu.addItem(
+                withTitle: "Thu gọn / Mở rộng nhãn menu bên trái (Chỉ hiện Icon)",
+                action: #selector(toggleCompactSidebarAction),
+                keyEquivalent: "s"
+            )
+            compactSidebarItem.keyEquivalentModifierMask = [.command, .option]
+            compactSidebarItem.target = self
+
+            viewMenu.addItem(.separator())
             for num in 1...9 {
                 let swItem = viewMenu.addItem(
                     withTitle: "Chuyển nhanh sang Tài khoản #\(num)",
@@ -422,6 +448,14 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
     @objc private func toggleStandaloneToolbarAction() {
         WorkspaceStore.shared.showStandaloneToolbar.toggle()
+    }
+
+    @objc private func toggleLeftSidebarAction() {
+        WorkspaceStore.shared.toggleLeftSidebar()
+    }
+
+    @objc private func toggleCompactSidebarAction() {
+        WorkspaceStore.shared.toggleSidebarCompactMode()
     }
 
     @objc private func switchAccountShortcut(_ sender: NSMenuItem) {

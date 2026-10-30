@@ -368,6 +368,27 @@ final class WorkspaceStore: ObservableObject {
         save()
     }
 
+    // MARK: - Spaces & Sidebar Layout
+
+    func toggleLeftSidebar() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            preferences.isSidebarVisible.toggle()
+        }
+        save()
+    }
+
+    func toggleSidebarCompactMode() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if !preferences.isSidebarVisible {
+                preferences.isSidebarVisible = true
+                preferences.isSidebarCompact = true
+            } else {
+                preferences.isSidebarCompact.toggle()
+            }
+        }
+        save()
+    }
+
     // MARK: - Spaces CRUD
 
     func addSpace(name: String, symbolName: String, colorHex: String) {
