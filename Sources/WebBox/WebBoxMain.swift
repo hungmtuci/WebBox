@@ -125,10 +125,14 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
                 }
             }
 
-            // 2. Cmd + \ or Cmd + Shift + S -> Toggle Left Sidebar
+            // 2. Cmd + \ or Cmd + Shift + S -> Hide/Show Left Sidebar; Cmd + Option + S -> Compact Icon-Only Mode
             if !store.isStandaloneMode {
                 if (chars == "\\" && flags == [.command]) || (chars == "s" && flags == [.command, .shift]) {
                     store.toggleLeftSidebar()
+                    return nil
+                }
+                if chars == "s" && flags == [.command, .option] {
+                    store.toggleSidebarCompactMode()
                     return nil
                 }
             }
@@ -222,8 +226,14 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let idStr = response.notification.request.content.userInfo["instanceID"] as? String
+        let userInfo = response.notification.request.content.userInfo
+        let revealPath = userInfo["revealFilePath"] as? String
+        let idStr = userInfo["instanceID"] as? String
         Task { @MainActor in
+            if let revealPath, !revealPath.isEmpty {
+                WorkspaceStore.shared.revealFileInFinder(URL(fileURLWithPath: revealPath))
+                return
+            }
             self.openOrFocusMainWindow()
             if let idStr, let uuid = UUID(uuidString: idStr) {
                 WorkspaceStore.shared.selectInstance(uuid)
@@ -440,8 +450,16 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         if !store.isStandaloneMode {
             viewMenu.addItem(.separator())
 
+            let compactSidebarItem = viewMenu.addItem(
+                withTitle: "Thu gọn / Mở rộng thanh bên chỉ hiện Icon",
+                action: #selector(toggleCompactSidebarAction),
+                keyEquivalent: "s"
+            )
+            compactSidebarItem.keyEquivalentModifierMask = [.command, .option]
+            compactSidebarItem.target = self
+
             let toggleSidebarItem = viewMenu.addItem(
-                withTitle: "Ẩn / Hiện thanh bên trái",
+                withTitle: "Ẩn / Hiện hoàn toàn thanh bên trái",
                 action: #selector(toggleLeftSidebarAction),
                 keyEquivalent: "\\"
             )
@@ -544,6 +562,10 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     @objc private func zoomResetAction() {
         guard let id = WorkspaceStore.shared.activeInstanceID else { return }
         WebSessionManager.shared.adjustZoom(instanceID: id, delta: 0, reset: true)
+    }
+
+    @objc private func toggleCompactSidebarAction() {
+        WorkspaceStore.shared.toggleSidebarCompactMode()
     }
 
     @objc private func toggleLeftSidebarAction() {

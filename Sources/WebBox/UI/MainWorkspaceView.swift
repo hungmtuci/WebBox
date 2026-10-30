@@ -1,6 +1,22 @@
 import SwiftUI
 import AppKit
 
+/// Authentic macOS Sidebar Vibrancy background for the Compact Icon-Only Rail.
+private struct SidebarVibrancyBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = .sidebar
+        nsView.blendingMode = .behindWindow
+    }
+}
+
 struct MainWorkspaceView: View {
     @ObservedObject var store = WorkspaceStore.shared
     @ObservedObject var sessionManager = WebSessionManager.shared
@@ -9,13 +25,21 @@ struct MainWorkspaceView: View {
     private var sidebarVisibilityBinding: Binding<NavigationSplitViewVisibility> {
         Binding(
             get: {
-                store.preferences.isSidebarVisible ? .all : .detailOnly
+                (store.preferences.isSidebarVisible && !store.preferences.isSidebarCompact) ? .all : .detailOnly
             },
             set: { newValue in
-                let isVisible = (newValue != .detailOnly)
-                if store.preferences.isSidebarVisible != isVisible {
-                    store.preferences.isSidebarVisible = isVisible
-                    store.save()
+                let wantsFullColumn = (newValue != .detailOnly)
+                if wantsFullColumn {
+                    if !store.preferences.isSidebarVisible || store.preferences.isSidebarCompact {
+                        store.preferences.isSidebarVisible = true
+                        store.preferences.isSidebarCompact = false
+                        store.save()
+                    }
+                } else {
+                    if !store.preferences.isSidebarCompact && store.preferences.isSidebarVisible {
+                        store.preferences.isSidebarVisible = false
+                        store.save()
+                    }
                 }
             }
         )
@@ -43,9 +67,17 @@ struct MainWorkspaceView: View {
             } else {
                 NavigationSplitView(columnVisibility: sidebarVisibilityBinding) {
                     sidebarColumnView
-                        .navigationSplitViewColumnWidth(min: 205, ideal: 236, max: 300)
+                        .navigationSplitViewColumnWidth(min: 208, ideal: 236, max: 300)
                 } detail: {
-                    detailPaneView
+                    HStack(spacing: 0) {
+                        if store.preferences.isSidebarVisible && store.preferences.isSidebarCompact {
+                            compactIconRailView
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                            Divider()
+                        }
+
+                        detailPaneView
+                    }
                 }
                 .navigationSplitViewStyle(.balanced)
             }
@@ -62,28 +94,12 @@ struct MainWorkspaceView: View {
                     .zIndex(25)
             }
 
-            // Native macOS Floating Toast Pill
-            if let toast = store.toastMessage {
+            // Native macOS Floating Toast Banner (Interactive click-to-reveal-in-Finder for completed downloads!)
+            if let toast = store.activeToast {
                 VStack {
                     Spacer()
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text(toast)
-                            .font(.callout.weight(.medium))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .background(
-                        Capsule()
-                            .fill(.regularMaterial)
-                            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-                    )
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
-                    )
-                    .padding(.bottom, 18)
+                    toastBannerView(for: toast)
+                        .padding(.bottom, 18)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(30)
@@ -103,7 +119,96 @@ struct MainWorkspaceView: View {
         }
     }
 
-    // MARK: - Native macOS Vibrancy Sidebar
+    // MARK: - Interactive Toast Banner (Click Download Notification -> Reveal in Finder)
+
+    @ViewBuilder
+    private func toastBannerView(for toast: WorkspaceToast) -> some View {
+        if let revealURL = toast.revealFileURL {
+            HStack(spacing: 10) {
+                Button {
+                    store.revealFileInFinder(revealURL)
+                    store.dismissToast()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.green)
+
+                        VStack(alignment: .leading, spacing: 1.5) {
+                            Text(toast.message)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Text("Bấm vào thông báo này để hiện tệp trên Finder")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: 420, alignment: .leading)
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.fill")
+                            Text("Hiện trên Finder")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.14))
+                        )
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Bấm để mở Finder và bôi đậm tệp vừa tải xuống")
+
+                Button {
+                    store.dismissToast()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Đóng thông báo")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 1)
+            )
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(toast.message)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
+            )
+        }
+    }
+
+    // MARK: - Full Expanded Vibrancy Sidebar
 
     private var sidebarColumnView: some View {
         List(selection: activeSelectionBinding) {
@@ -130,62 +235,78 @@ struct MainWorkspaceView: View {
             Text(currentSpace?.name ?? "Tài khoản")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             Spacer(minLength: 4)
 
             if !store.spaces.isEmpty {
-                Menu {
-                    Button {
-                        store.selectedSpaceID = nil
-                        if let first = store.filteredInstances.first {
-                            store.selectInstance(first.id)
-                        }
-                    } label: {
-                        HStack {
-                            Label("Tất cả (\(store.instances.count))", systemImage: "tray.full")
-                            if store.selectedSpaceID == nil {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    ForEach(store.spaces) { sp in
-                        let count = store.instances.filter { $0.spaceID == sp.id }.count
-                        Button {
-                            store.selectedSpaceID = sp.id
-                            if let first = store.filteredInstances.first {
-                                store.selectInstance(first.id)
-                            }
-                        } label: {
-                            HStack {
-                                Label("\(sp.name) (\(count))", systemImage: sp.symbolName)
-                                if store.selectedSpaceID == sp.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        store.isGlobalSettingsPresented = true
-                    } label: {
-                        Label("Quản lý Không gian...", systemImage: "folder.badge.gearshape")
-                    }
-                } label: {
-                    Image(systemName: store.selectedSpaceID == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(store.selectedSpaceID == nil ? Color.secondary : Color.accentColor)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Lọc theo Không gian làm việc (Spaces)")
+                spaceFilterMenu(iconOnly: true)
             }
+
+            Button {
+                store.setSidebarDisplayMode(.compactIcons)
+            } label: {
+                Image(systemName: "arrow.left.to.line")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Thu gọn menu bên trái chỉ hiện biểu tượng Icon (⌘⌥S)")
         }
         .textCase(nil)
+    }
+
+    @ViewBuilder
+    private func spaceFilterMenu(iconOnly: Bool) -> some View {
+        Menu {
+            Button {
+                store.selectedSpaceID = nil
+                if let first = store.filteredInstances.first {
+                    store.selectInstance(first.id)
+                }
+            } label: {
+                HStack {
+                    Label("Tất cả (\(store.instances.count))", systemImage: "tray.full")
+                    if store.selectedSpaceID == nil {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Divider()
+
+            ForEach(store.spaces) { sp in
+                let count = store.instances.filter { $0.spaceID == sp.id }.count
+                Button {
+                    store.selectedSpaceID = sp.id
+                    if let first = store.filteredInstances.first {
+                        store.selectInstance(first.id)
+                    }
+                } label: {
+                    HStack {
+                        Label("\(sp.name) (\(count))", systemImage: sp.symbolName)
+                        if store.selectedSpaceID == sp.id {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                store.isGlobalSettingsPresented = true
+            } label: {
+                Label("Quản lý Không gian...", systemImage: "folder.badge.gearshape")
+            }
+        } label: {
+            Image(systemName: store.selectedSpaceID == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                .font(iconOnly ? .caption : .callout)
+                .foregroundStyle(store.selectedSpaceID == nil ? Color.secondary : Color.accentColor)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Lọc theo Không gian làm việc (Spaces)")
     }
 
     private func sidebarAccountRow(instance: WebAppInstance) -> some View {
@@ -258,28 +379,29 @@ struct MainWorkspaceView: View {
         }
     }
 
-    // Native macOS Bottom Action Bar inside Sidebar (Apple Mail / Notes / Reminders pattern)
+    // Native macOS Bottom Action Bar inside Full Sidebar
     private var sidebarBottomBar: some View {
         VStack(spacing: 0) {
             Divider()
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button {
                     store.isCatalogPresented = true
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "plus.circle.fill")
                             .symbolRenderingMode(.hierarchical)
-                        Text("Thêm ứng dụng")
+                        Text("Thêm App")
                             .font(.callout.weight(.medium))
+                            .lineLimit(1)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.borderless)
                 .help("Mở kho ứng dụng hoặc thêm Website bất kỳ (⌘N)")
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 2)
 
-                // GitHub Self-Update Control
                 sidebarUpdateStatusControl
 
                 Button {
@@ -306,6 +428,157 @@ struct MainWorkspaceView: View {
         }
     }
 
+    // MARK: - Compact Icon-Only Sidebar Rail (64pt Vibrancy Rail)
+
+    private var compactIconRailView: some View {
+        VStack(spacing: 0) {
+            // Top Expand / Space Filter Header
+            VStack(spacing: 6) {
+                Button {
+                    store.setSidebarDisplayMode(.expanded)
+                } label: {
+                    Image(systemName: "arrow.right.to.line")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Mở rộng lại thanh bên đầy đủ (⌘⌥S)")
+
+                if !store.spaces.isEmpty {
+                    spaceFilterMenu(iconOnly: false)
+                        .padding(.bottom, 2)
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            Divider()
+                .padding(.horizontal, 10)
+
+            // Scrollable App Icons Column
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(store.filteredInstances.enumerated()), id: \.element.id) { index, instance in
+                        compactAccountIconCell(instance: instance, index: index)
+                    }
+                }
+                .padding(.vertical, 10)
+            }
+
+            Divider()
+                .padding(.horizontal, 10)
+
+            // Compact Bottom Controls
+            VStack(spacing: 8) {
+                Button {
+                    store.isCatalogPresented = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 36, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Thêm ứng dụng / Tài khoản mới (⌘N)")
+
+                sidebarUpdateStatusControl
+
+                Button {
+                    store.isDedicatedAppsManagerPresented = true
+                } label: {
+                    Image(systemName: "app.badge.checkmark")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Quản lý Dedicated .app độc lập")
+
+                Button {
+                    store.isGlobalSettingsPresented = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Cài đặt chung WebBox (⌘,)")
+            }
+            .padding(.vertical, 10)
+        }
+        .frame(width: 64)
+        .background(SidebarVibrancyBackground())
+    }
+
+    private func compactAccountIconCell(instance: WebAppInstance, index: Int) -> some View {
+        let isActive = store.activeInstance?.id == instance.id
+        let isSplitSecondary = store.secondarySplitInstanceID == instance.id
+        let rtState = sessionManager.state(for: instance.id)
+        let shortcutHint = index < 9 ? " (⌘\(index + 1))" : ""
+
+        return ZStack(alignment: .leading) {
+            // Active Accent Bar on Left Edge
+            if isActive {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3.5, height: 22)
+                    .offset(x: 2)
+            } else if isSplitSecondary {
+                Capsule()
+                    .fill(Color.blue.opacity(0.65))
+                    .frame(width: 3, height: 14)
+                    .offset(x: 2)
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+
+                ZStack(alignment: .topTrailing) {
+                    AppInstanceAvatarView(instance: instance, size: 38, showBadgePill: true)
+                        .opacity(rtState.isHibernated ? 0.55 : 1.0)
+                        .padding(5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(isActive ? Color.accentColor.opacity(0.16) : Color.clear)
+                        )
+
+                    if rtState.unreadCount > 0 {
+                        Text(rtState.unreadCount > 99 ? "99+" : "\(rtState.unreadCount)")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4.5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red))
+                            .offset(x: 3, y: -1)
+                    } else if rtState.hasUnreadDot {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 9, height: 9)
+                            .offset(x: 1, y: 0)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(width: 64, height: 48)
+        .contentShape(Rectangle())
+        .help("\(instance.displayTitle)\(shortcutHint)")
+        .onTapGesture {
+            store.selectInstance(instance.id)
+        }
+        .contextMenu {
+            instanceContextMenu(for: instance, rtState: rtState)
+        }
+    }
+
     @ViewBuilder
     private var sidebarUpdateStatusControl: some View {
         switch updater.state {
@@ -313,12 +586,9 @@ struct MainWorkspaceView: View {
             Button {
                 updater.showUpdatePromptDialog = true
             } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.down.circle.fill")
-                    Text("v\(info.version)")
-                        .font(.caption2.weight(.bold))
-                }
-                .foregroundStyle(.green)
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.green)
             }
             .buttonStyle(.borderless)
             .help("Đã có bản mới v\(info.version) trên GitHub — Bấm để cập nhật tự động")
@@ -335,6 +605,7 @@ struct MainWorkspaceView: View {
             } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
             .help("Kiểm tra bản cập nhật mới từ GitHub (⌘U)")
@@ -380,6 +651,21 @@ struct MainWorkspaceView: View {
 
         // Left / Navigation Cluster
         ToolbarItemGroup(placement: .navigation) {
+            if !store.isStandaloneMode {
+                Button {
+                    store.toggleSidebarCompactMode()
+                } label: {
+                    Image(systemName: store.preferences.isSidebarCompact && store.preferences.isSidebarVisible
+                        ? "arrow.right.to.line.compact"
+                        : "sidebar.squares.leading")
+                }
+                .help(
+                    store.preferences.isSidebarCompact && store.preferences.isSidebarVisible
+                        ? "Mở rộng thanh bên đầy đủ (⌘⌥S)"
+                        : "Thu gọn thanh bên chỉ hiện biểu tượng Icon (⌘⌥S)"
+                )
+            }
+
             Button {
                 sessionManager.goBack(instanceID: active.id)
             } label: {
@@ -410,7 +696,7 @@ struct MainWorkspaceView: View {
             }
             .help("Về trang chủ của ứng dụng")
 
-            // Quick Account Switcher right in the toolbar when Left Sidebar is hidden!
+            // Quick Account Switcher right in the toolbar when Left Sidebar is completely hidden!
             if !store.isStandaloneMode && !store.preferences.isSidebarVisible {
                 Menu {
                     Section("Chuyển nhanh tài khoản:") {
@@ -435,15 +721,15 @@ struct MainWorkspaceView: View {
                     Divider()
 
                     Button {
-                        store.isCatalogPresented = true
+                        store.setSidebarDisplayMode(.compactIcons)
                     } label: {
-                        Label("Thêm ứng dụng / Tài khoản mới...", systemImage: "plus.circle")
+                        Label("Hiện thanh bên thu gọn (Chỉ Icon) (⌘⌥S)", systemImage: "sidebar.squares.leading")
                     }
 
                     Button {
-                        store.toggleLeftSidebar()
+                        store.setSidebarDisplayMode(.expanded)
                     } label: {
-                        Label("Hiện thanh bên trái (⌘\\)", systemImage: "sidebar.leading")
+                        Label("Hiện thanh bên đầy đủ (⌘\\)", systemImage: "sidebar.leading")
                     }
                 } label: {
                     ZStack(alignment: .topTrailing) {
@@ -568,7 +854,7 @@ struct MainWorkspaceView: View {
                 .help("Chia đôi màn hình để dùng 2 tài khoản cùng lúc")
             }
 
-            // Downloads Popover
+            // Downloads Popover (Always accessible once downloads occur, or configure in Settings)
             if !sessionManager.downloads.isEmpty {
                 Button {
                     store.isDownloadsPopoverShown.toggle()
@@ -579,7 +865,7 @@ struct MainWorkspaceView: View {
                 .popover(isPresented: $store.isDownloadsPopoverShown) {
                     downloadsPopoverView
                 }
-                .help("Danh sách tệp tải xuống")
+                .help("Danh sách tệp tải xuống & Thư mục lưu")
             }
 
             // Open Current URL in External Browser
@@ -796,7 +1082,7 @@ struct MainWorkspaceView: View {
         .background(.bar)
     }
 
-    // MARK: - Downloads Popover
+    // MARK: - Downloads Popover (Click Row -> Reveal in Finder + Quick Folder Config)
 
     private var downloadsPopoverView: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -815,43 +1101,91 @@ struct MainWorkspaceView: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(sessionManager.downloads) { item in
                         HStack(spacing: 10) {
                             Image(systemName: item.state == .completed ? "checkmark.circle.fill" : "arrow.down.circle")
                                 .foregroundStyle(item.state == .completed ? .green : .blue)
+
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.filename)
                                     .font(.caption.weight(.semibold))
                                     .lineLimit(1)
+                                    .truncationMode(.middle)
                                 if let frac = item.progressFraction, item.state == .downloading {
                                     ProgressView(value: frac)
                                         .controlSize(.mini)
                                 } else {
-                                    Text(item.sourceInstanceTitle)
+                                    Text(item.state == .completed ? "\(item.sourceInstanceTitle) • Bấm để hiện trên Finder" : item.sourceInstanceTitle)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer()
+
+                            Spacer(minLength: 4)
+
                             if let url = item.destinationURL, item.state == .completed {
                                 Button("Mở") {
                                     NSWorkspace.shared.open(url)
                                 }
                                 .controlSize(.mini)
-                                Button("Finder") {
-                                    NSWorkspace.shared.activateFileViewerSelecting([url])
+
+                                Button {
+                                    store.revealFileInFinder(url)
+                                    store.isDownloadsPopoverShown = false
+                                } label: {
+                                    Image(systemName: "magnifyingglass")
                                 }
                                 .controlSize(.mini)
+                                .help("Hiện tệp này trên Finder")
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if let url = item.destinationURL, item.state == .completed {
+                                store.revealFileInFinder(url)
+                                store.isDownloadsPopoverShown = false
                             }
                         }
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxHeight: 230)
+
+            Divider()
+
+            // Quick Download Folder Footer Bar
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(store.resolvedDownloadsDirectoryURL().lastPathComponent)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(store.preferences.downloadsDirectory)
+
+                Spacer()
+
+                Button("Mở thư mục") {
+                    store.openDownloadsDirectory()
+                }
+                .controlSize(.mini)
+
+                Button("Đổi nơi lưu...") {
+                    store.chooseDownloadsDirectory()
+                }
+                .controlSize(.mini)
+            }
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 375)
     }
 
     // MARK: - Empty Workspace Welcome View

@@ -51,7 +51,7 @@ final class WorkspaceStore: ObservableObject {
     @Published var isFindBarVisible: Bool = false
     @Published var findQuery: String = ""
     @Published var showStandaloneToolbar: Bool = true
-    @Published var toastMessage: String? = nil
+    @Published var activeToast: WorkspaceToast? = nil
 
     private let appSupportDir: URL
     private let stateFileURL: URL
@@ -96,6 +96,12 @@ final class WorkspaceStore: ObservableObject {
         if let data = try? Data(contentsOf: overrideFile),
            let saved = try? JSONDecoder().decode(WebAppInstance.self, from: data) {
             loadedInstance = saved
+        }
+
+        if let hubData = try? Data(contentsOf: stateFileURL),
+           let hubDecoded = try? JSONDecoder().decode(PersistedHubState.self, from: hubData) {
+            self.preferences.downloadsDirectory = hubDecoded.preferences.downloadsDirectory
+            self.preferences.askWhereToSaveEachDownload = hubDecoded.preferences.askWhereToSaveEachDownload
         }
 
         self.preferences.defaultLinkRoutingMode = manifest.defaultLinkRoutingMode
@@ -389,6 +395,13 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: - Spaces & Sidebar Layout
 
+    func setSidebarDisplayMode(_ mode: SidebarDisplayMode) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            preferences.sidebarDisplayMode = mode
+        }
+        save()
+    }
+
     func toggleLeftSidebar() {
         withAnimation(.easeInOut(duration: 0.18)) {
             preferences.isSidebarVisible.toggle()
@@ -406,6 +419,57 @@ final class WorkspaceStore: ObservableObject {
             }
         }
         save()
+    }
+
+    // MARK: - Downloads Directory & Finder Reveal Helpers
+
+    func resolvedDownloadsDirectoryURL() -> URL {
+        let fallback = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let expanded = (preferences.downloadsDirectory as NSString).expandingTildeInPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expanded.isEmpty else { return fallback }
+        let url = URL(fileURLWithPath: expanded, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        } catch {
+            return fallback
+        }
+    }
+
+    func chooseDownloadsDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Chọn thư mục lưu tệp tải xuống"
+        panel.prompt = "Chọn thư mục"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = resolvedDownloadsDirectoryURL()
+        if panel.runModal() == .OK, let chosen = panel.url {
+            preferences.downloadsDirectory = chosen.path
+            save()
+            showToast("Đã đặt thư mục tải xuống: \(chosen.lastPathComponent)")
+        }
+    }
+
+    func openDownloadsDirectory() {
+        let dir = resolvedDownloadsDirectoryURL()
+        NSWorkspace.shared.open(dir)
+    }
+
+    func revealFileInFinder(_ fileURL: URL) {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        } else {
+            let parent = fileURL.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: parent.path) {
+                NSWorkspace.shared.open(parent)
+            } else {
+                openDownloadsDirectory()
+            }
+        }
     }
 
     // MARK: - Spaces CRUD
@@ -589,17 +653,26 @@ final class WorkspaceStore: ObservableObject {
 
     // MARK: - Toast Helper
 
-    func showToast(_ message: String) {
+    func dismissToast() {
         toastClearTask?.cancel()
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-            toastMessage = message
+        withAnimation(.easeOut(duration: 0.18)) {
+            activeToast = nil
         }
+    }
+
+    func showToast(_ message: String, revealFileURL: URL? = nil) {
+        toastClearTask?.cancel()
+        let newToast = WorkspaceToast(message: message, revealFileURL: revealFileURL)
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            activeToast = newToast
+        }
+        let durationNs: UInt64 = revealFileURL != nil ? 7_500_000_000 : 2_800_000_000
         toastClearTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            try? await Task.sleep(nanoseconds: durationNs)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.2)) {
-                if self.toastMessage == message {
-                    self.toastMessage = nil
+                if self.activeToast?.id == newToast.id {
+                    self.activeToast = nil
                 }
             }
         }

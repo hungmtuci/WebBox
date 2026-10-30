@@ -216,6 +216,28 @@ struct InstanceSettingsSheetView: View {
                             .controlSize(.small)
                         }
                     } else {
+                        LabeledContent("Thư mục lưu tệp tải về:") {
+                            HStack(spacing: 8) {
+                                Text(store.preferences.downloadsDirectory)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Button("Mở") {
+                                    store.openDownloadsDirectory()
+                                }
+                                .controlSize(.small)
+
+                                Button("Thay đổi...") {
+                                    store.chooseDownloadsDirectory()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+
+                        Toggle("Hỏi vị trí lưu mỗi khi tải tệp xuống", isOn: $store.preferences.askWhereToSaveEachDownload)
+
                         Button(role: .destructive) {
                             ui.confirmClearSession = true
                         } label: {
@@ -416,8 +438,15 @@ struct GlobalSettingsSheetView: View {
                 }
 
                 Section("Giao diện, Biểu tượng & Hệ thống") {
-                    Toggle("Hiện thanh bên trái (Sidebar)", isOn: $store.preferences.isSidebarVisible)
-                    Toggle("Hiện nhãn tên tài khoản phụ dưới tên ứng dụng ở thanh bên", isOn: $store.preferences.showAccountLabelsInSidebar)
+                    Picker("Chế độ thanh bên trái:", selection: $store.preferences.sidebarDisplayMode) {
+                        ForEach(SidebarDisplayMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+
+                    if !store.preferences.isSidebarCompact {
+                        Toggle("Hiện nhãn tên tài khoản phụ dưới tên ứng dụng ở thanh bên", isOn: $store.preferences.showAccountLabelsInSidebar)
+                    }
                     Toggle("Chế độ Không làm phiền (Tạm tắt toàn bộ thông báo đẩy)", isOn: $store.preferences.globalDoNotDisturb)
                     Toggle("Bật công cụ Web Inspector (Inspect Element khi chuột phải)", isOn: $store.preferences.enableDeveloperExtras)
 
@@ -440,6 +469,42 @@ struct GlobalSettingsSheetView: View {
                         }
                         .controlSize(.small)
                     }
+                }
+
+                Section {
+                    LabeledContent("Thư mục lưu tệp tải về:") {
+                        HStack(spacing: 8) {
+                            Text(store.preferences.downloadsDirectory)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Button("Mở") {
+                                store.openDownloadsDirectory()
+                            }
+                            .controlSize(.small)
+
+                            Button("Thay đổi...") {
+                                store.chooseDownloadsDirectory()
+                            }
+                            .controlSize(.small)
+
+                            if store.preferences.downloadsDirectory != GlobalWorkspacePreferences.defaultDownloadsDirectoryPath {
+                                Button("Mặc định") {
+                                    store.preferences.downloadsDirectory = GlobalWorkspacePreferences.defaultDownloadsDirectoryPath
+                                    store.save()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+
+                    Toggle("Hỏi vị trí lưu mỗi khi tải tệp xuống", isOn: $store.preferences.askWhereToSaveEachDownload)
+                } header: {
+                    Text("Tệp tải xuống (Downloads)")
+                } footer: {
+                    Text("Khi tải tệp hoàn tất, bấm trực tiếp vào thông báo ở cuối cửa sổ để mở nhanh và bôi đậm tệp trên Finder.")
                 }
 
                 Section("Thư mục lưu Dedicated Desktop Apps (.app)") {

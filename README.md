@@ -38,7 +38,8 @@
   3. **Mở bằng Trình duyệt ngoài**: Tự động đẩy sang trình duyệt mặc định macOS hoặc trình duyệt chỉ định riêng cho tài khoản đó.
 - **Phím tắt tiện lợi chuẩn macOS**:
   - `⌘R` / `⌘⇧R`: Tải lại trang hiện tại / Tải lại hoàn toàn bỏ qua bộ nhớ đệm.
-  - `⌘\` hoặc `⌘⇧S`: Ẩn / Hiện thanh bên trái (Sidebar).
+  - `⌘⌥S`: Thu gọn / Mở rộng thanh bên trái dạng chỉ hiện biểu tượng Icon (Compact Rail).
+  - `⌘\` hoặc `⌘⇧S`: Ẩn / Hiện hoàn toàn thanh bên trái (Sidebar).
   - `⌘1` … `⌘9`: Chuyển nhanh giữa các tài khoản.
   - `⌘N` / `⌘⇧N`: Thêm ứng dụng mới / Nhân bản nhanh tài khoản đang mở.
   - `⌘F`: Tìm nội dung trong trang • `⌘+` / `⌘-` / `⌘0`: Thu phóng trang • `⌘U`: Kiểm tra cập nhật GitHub.
@@ -55,5 +56,5 @@ chmod +x build_webbox.sh
 
 Sau khi chạy xong:
 - Ứng dụng hoàn chỉnh: `WebBox.app`
-- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.2.dmg`
-- Bản nén ZIP: `dist/WebBox-v1.0.2-macOS.zip`
+- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.3.dmg`
+- Bản nén ZIP: `dist/WebBox-v1.0.3-macOS.zip`

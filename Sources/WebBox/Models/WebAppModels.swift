@@ -276,6 +276,33 @@ struct StandaloneAppManifest: Codable {
     var createdVersion: String
 }
 
+// MARK: - Sidebar Display Mode & Actionable Toast
+
+enum SidebarDisplayMode: String, Codable, CaseIterable, Identifiable {
+    case expanded = "expanded"
+    case compactIcons = "compactIcons"
+    case hidden = "hidden"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expanded:
+            return "Đầy đủ (Icon & Tên tài khoản)"
+        case .compactIcons:
+            return "Thu gọn (Chỉ hiện biểu tượng Icon)"
+        case .hidden:
+            return "Ẩn hoàn toàn"
+        }
+    }
+}
+
+struct WorkspaceToast: Equatable {
+    let id = UUID()
+    let message: String
+    let revealFileURL: URL?
+}
+
 // MARK: - Global Preferences
 
 struct GlobalWorkspacePreferences: Codable {
@@ -288,11 +315,37 @@ struct GlobalWorkspacePreferences: Codable {
     var isSidebarVisible: Bool = true
     var isSidebarCompact: Bool = false
     var showAccountLabelsInSidebar: Bool = true
+    var downloadsDirectory: String = Self.defaultDownloadsDirectoryPath
+    var askWhereToSaveEachDownload: Bool = false
     var dedicatedAppsInstallDirectory: String = {
         let homeApps = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications", isDirectory: true).path
         return homeApps
     }()
+
+    static var defaultDownloadsDirectoryPath: String {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true).path
+    }
+
+    var sidebarDisplayMode: SidebarDisplayMode {
+        get {
+            if !isSidebarVisible { return .hidden }
+            return isSidebarCompact ? .compactIcons : .expanded
+        }
+        set {
+            switch newValue {
+            case .expanded:
+                isSidebarVisible = true
+                isSidebarCompact = false
+            case .compactIcons:
+                isSidebarVisible = true
+                isSidebarCompact = true
+            case .hidden:
+                isSidebarVisible = false
+            }
+        }
+    }
 
     init() {}
 
@@ -306,6 +359,8 @@ struct GlobalWorkspacePreferences: Codable {
         case isSidebarVisible
         case isSidebarCompact
         case showAccountLabelsInSidebar
+        case downloadsDirectory
+        case askWhereToSaveEachDownload
         case dedicatedAppsInstallDirectory
     }
 
@@ -320,6 +375,8 @@ struct GlobalWorkspacePreferences: Codable {
         isSidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .isSidebarVisible) ?? true
         isSidebarCompact = try c.decodeIfPresent(Bool.self, forKey: .isSidebarCompact) ?? false
         showAccountLabelsInSidebar = try c.decodeIfPresent(Bool.self, forKey: .showAccountLabelsInSidebar) ?? true
+        downloadsDirectory = try c.decodeIfPresent(String.self, forKey: .downloadsDirectory) ?? Self.defaultDownloadsDirectoryPath
+        askWhereToSaveEachDownload = try c.decodeIfPresent(Bool.self, forKey: .askWhereToSaveEachDownload) ?? false
         let defaultDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications", isDirectory: true).path
         dedicatedAppsInstallDirectory = try c.decodeIfPresent(String.self, forKey: .dedicatedAppsInstallDirectory) ?? defaultDir

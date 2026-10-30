@@ -292,6 +292,23 @@ final class WebSessionManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(req)
     }
 
+    func postDownloadCompletedNotification(filename: String, fileURL: URL) {
+        guard !WorkspaceStore.shared.preferences.globalDoNotDisturb else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Đã tải xong tệp"
+        content.body = "\(filename) — Bấm vào thông báo để hiện trên Finder"
+        content.sound = .default
+        content.userInfo = ["revealFilePath": fileURL.path]
+
+        let req = UNNotificationRequest(
+            identifier: "webbox.download.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(req)
+    }
+
     func refreshDockBadge() {
         let totalUnread = runtimeStates.values.reduce(0) { $0 + $1.unreadCount }
         let anyDot = runtimeStates.values.contains { $0.hasUnreadDot }
@@ -553,6 +570,11 @@ final class WebSessionManager: NSObject, ObservableObject {
         if finished {
             activeDownloads.removeValue(forKey: item.id)
         }
+    }
+
+    fileprivate func cancelAndCleanupDownload(id: UUID) {
+        activeDownloads.removeValue(forKey: id)
+        downloads.removeAll { $0.id == id }
     }
 
     fileprivate func updateRuntimeState(for id: UUID, mutate: (inout InstanceRuntimeState) -> Void) {
@@ -1166,6 +1188,23 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
 
     func webView(
         _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download, preferences)
+            return
+        }
+        decisionHandler(.allow, preferences)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        manager?.attachDownload(download, sourceTitle: "Trình duyệt WebBox")
+    }
+
+    func webView(
+        _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
         decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
     ) {
@@ -1281,8 +1320,40 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
         suggestedFilename: String,
         completionHandler: @escaping (URL?) -> Void
     ) {
-        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
+        let store = WorkspaceStore.shared
+        let downloadsDir = store.resolvedDownloadsDirectoryURL()
+
+        if store.preferences.askWhereToSaveEachDownload {
+            let panel = NSSavePanel()
+            panel.title = "Lưu tệp tải xuống"
+            panel.prompt = "Lưu"
+            panel.canCreateDirectories = true
+            panel.directoryURL = downloadsDir
+            panel.nameFieldStringValue = suggestedFilename
+            if panel.runModal() == .OK, let chosenURL = panel.url {
+                self.filename = chosenURL.lastPathComponent
+                self.destinationURL = chosenURL
+                manager?.upsertDownloadItem(
+                    DownloadTaskItem(
+                        id: id,
+                        sourceInstanceTitle: sourceTitle,
+                        filename: filename,
+                        destinationURL: chosenURL,
+                        bytesReceived: 0,
+                        expectedBytes: response.expectedContentLength,
+                        state: .downloading,
+                        startedAt: startedAt
+                    )
+                )
+                completionHandler(chosenURL)
+            } else {
+                progressObservation = nil
+                manager?.cancelAndCleanupDownload(id: id)
+                completionHandler(nil)
+            }
+            return
+        }
+
         let safeDestination = Self.uniqueFileURL(in: downloadsDir, suggestedName: suggestedFilename)
         self.filename = safeDestination.lastPathComponent
         self.destinationURL = safeDestination
@@ -1317,7 +1388,10 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
             ),
             finished: true
         )
-        WorkspaceStore.shared.showToast("Đã tải xong: \(filename)")
+        WorkspaceStore.shared.showToast("Đã tải xong: \(filename)", revealFileURL: destinationURL)
+        if let destinationURL {
+            manager?.postDownloadCompletedNotification(filename: filename, fileURL: destinationURL)
+        }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
