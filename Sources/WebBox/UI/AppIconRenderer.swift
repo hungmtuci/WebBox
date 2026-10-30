@@ -3,7 +3,8 @@ import SwiftUI
 
 enum AppIconRenderer {
     /// Renders a macOS squircle app icon as an NSImage at the requested pixel dimension,
-    /// optionally drawing a multi-account badge pill (e.g. "2", "CV", "SALE") at bottom-right.
+    /// using the full-bleed official app icon when available + optional multi-account corner badge pill.
+    @MainActor
     static func renderAppIconImage(
         for instance: WebAppInstance,
         pixelSize: Int = 256,
@@ -25,76 +26,102 @@ enum AppIconRenderer {
             return NSImage(size: NSSize(width: px, height: px))
         }
 
+        let resolvedIconData = instance.customIconPNGData
+            ?? instance.catalogID.flatMap { AppIconFetcher.shared.cachedIcon(forPresetID: $0) }
+
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
 
         let canvas = NSRect(x: 0, y: 0, width: CGFloat(px), height: CGFloat(px))
         let inset = CGFloat(px) * 0.08
         let bgRect = canvas.insetBy(dx: inset, dy: inset)
-        let cornerRadius = bgRect.width * 0.228
+        let cornerRadius = bgRect.width * 0.225
+        let squircle = NSBezierPath(roundedRect: bgRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
         let baseColor = NSColor.fromHex(instance.accentHex)
-        let topColor = baseColor.blended(withFraction: 0.22, of: .white) ?? baseColor
-        let bottomColor = baseColor.blended(withFraction: 0.26, of: .black) ?? baseColor
 
-        let squircle = NSBezierPath(roundedRect: bgRect, xRadius: cornerRadius, yRadius: cornerRadius)
-        if let gradient = NSGradient(colors: [topColor, baseColor, bottomColor]) {
-            gradient.draw(in: squircle, angle: -60)
-        } else {
-            baseColor.setFill()
-            squircle.fill()
-        }
-
-        // Subtle inner highlight border
-        NSColor.white.withAlphaComponent(0.22).setStroke()
-        squircle.lineWidth = max(1.0, CGFloat(px) * 0.012)
-        squircle.stroke()
-
-        // Draw custom icon PNG if available, otherwise SF Symbol or crisp Monogram
-        if let pngData = instance.customIconPNGData,
-           let customImg = NSImage(data: pngData) {
-            let iconBox = bgRect.insetBy(dx: bgRect.width * 0.17, dy: bgRect.height * 0.17)
-            NSGraphicsContext.current?.imageInterpolation = .high
-            customImg.draw(in: iconBox, from: .zero, operation: .sourceOver, fraction: 1.0)
-        } else if let symbolName = instance.symbolName,
-                  let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            let config = NSImage.SymbolConfiguration(pointSize: CGFloat(px) * 0.38, weight: .semibold)
-                .applying(.init(paletteColors: [.white]))
-            if let configured = symbol.withSymbolConfiguration(config) {
-                let symSize = configured.size
-                let drawRect = NSRect(
-                    x: canvas.midX - symSize.width / 2.0,
-                    y: canvas.midY - symSize.height / 2.0,
-                    width: symSize.width,
-                    height: symSize.height
-                )
-                configured.draw(in: drawRect)
+        if let pngData = resolvedIconData, let customImg = NSImage(data: pngData) {
+            var imgMaxPx = Int(max(customImg.size.width, customImg.size.height))
+            for r in customImg.representations {
+                imgMaxPx = max(imgMaxPx, max(r.pixelsWide, r.pixelsHigh))
             }
+
+            NSGraphicsContext.saveGraphicsState()
+            squircle.addClip()
+
+            if imgMaxPx >= 96 {
+                // Full-bleed high-resolution app icon inside macOS squircle
+                NSColor.white.setFill()
+                bgRect.fill()
+                customImg.draw(in: bgRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            } else {
+                // Smaller website favicon centered on clean white squircle card
+                NSColor.white.setFill()
+                bgRect.fill()
+                let pad = bgRect.width * 0.18
+                let iconBox = bgRect.insetBy(dx: pad, dy: pad)
+                customImg.draw(in: iconBox, from: .zero, operation: .sourceOver, fraction: 1.0)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+
+            NSColor.black.withAlphaComponent(0.10).setStroke()
+            squircle.lineWidth = max(1.0, CGFloat(px) * 0.01)
+            squircle.stroke()
         } else {
-            let text = instance.monogram.isEmpty
-                ? String(instance.name.prefix(2)).uppercased()
-                : String(instance.monogram.prefix(3))
-            let fontSize = text.count == 1 ? CGFloat(px) * 0.46 : CGFloat(px) * 0.33
-            let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: NSColor.white,
-                .paragraphStyle: paragraph
-            ]
-            let attrStr = NSAttributedString(string: text, attributes: attrs)
-            let strSize = attrStr.size()
-            let textRect = NSRect(
-                x: canvas.midX - strSize.width / 2.0,
-                y: canvas.midY - strSize.height / 2.0,
-                width: strSize.width,
-                height: strSize.height
-            )
-            attrStr.draw(in: textRect)
+            let topColor = baseColor.blended(withFraction: 0.22, of: .white) ?? baseColor
+            let bottomColor = baseColor.blended(withFraction: 0.26, of: .black) ?? baseColor
+            if let gradient = NSGradient(colors: [topColor, baseColor, bottomColor]) {
+                gradient.draw(in: squircle, angle: -60)
+            } else {
+                baseColor.setFill()
+                squircle.fill()
+            }
+
+            NSColor.white.withAlphaComponent(0.22).setStroke()
+            squircle.lineWidth = max(1.0, CGFloat(px) * 0.012)
+            squircle.stroke()
+
+            if let symbolName = instance.symbolName,
+               let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+                let config = NSImage.SymbolConfiguration(pointSize: CGFloat(px) * 0.38, weight: .semibold)
+                    .applying(.init(paletteColors: [.white]))
+                if let configured = symbol.withSymbolConfiguration(config) {
+                    let symSize = configured.size
+                    let drawRect = NSRect(
+                        x: canvas.midX - symSize.width / 2.0,
+                        y: canvas.midY - symSize.height / 2.0,
+                        width: symSize.width,
+                        height: symSize.height
+                    )
+                    configured.draw(in: drawRect)
+                }
+            } else {
+                let text = instance.monogram.isEmpty
+                    ? String(instance.name.prefix(2)).uppercased()
+                    : String(instance.monogram.prefix(3))
+                let fontSize = text.count == 1 ? CGFloat(px) * 0.46 : CGFloat(px) * 0.33
+                let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.alignment = .center
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: NSColor.white,
+                    .paragraphStyle: paragraph
+                ]
+                let attrStr = NSAttributedString(string: text, attributes: attrs)
+                let strSize = attrStr.size()
+                let textRect = NSRect(
+                    x: canvas.midX - strSize.width / 2.0,
+                    y: canvas.midY - strSize.height / 2.0,
+                    width: strSize.width,
+                    height: strSize.height
+                )
+                attrStr.draw(in: textRect)
+            }
         }
 
-        // Draw multi-account corner badge on icon if configured (great for Dock icons!)
+        // Draw multi-account corner badge on icon if configured
         let badgeRaw = instance.badgeShortText.trimmingCharacters(in: .whitespacesAndNewlines)
         if includeAccountBadge && !badgeRaw.isEmpty {
             let badgeText = String(badgeRaw.prefix(4)).uppercased()
@@ -140,7 +167,7 @@ enum AppIconRenderer {
         return finalImage
     }
 
-    /// Writes a complete AppIcon.icns file for an exported Dedicated .app bundle.
+    @MainActor
     static func writeICNSFile(for instance: WebAppInstance, destinationICNSURL: URL) throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("WebBoxIcon_\(UUID().uuidString).iconset", isDirectory: true)
@@ -177,41 +204,61 @@ enum AppIconRenderer {
     }
 }
 
-/// SwiftUI view for displaying an instance's icon cleanly in sidebars, cards, and headers.
+/// SwiftUI view for displaying an instance's icon with authentic macOS Sonoma/Sequoia squircle styling.
 struct AppInstanceAvatarView: View {
     let instance: WebAppInstance
-    var size: CGFloat = 40
+    var size: CGFloat = 32
     var showBadgePill: Bool = true
+    @ObservedObject private var iconFetcher = AppIconFetcher.shared
+
+    private var effectiveIconData: Data? {
+        if let custom = instance.customIconPNGData {
+            return custom
+        }
+        if let cid = instance.catalogID {
+            return iconFetcher.cachedPresetIcons[cid]
+        }
+        return nil
+    }
 
     var body: some View {
+        let corner = size * 0.225
+
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if let data = instance.customIconPNGData, let nsImage = NSImage(data: data) {
+                if let data = effectiveIconData, let nsImage = NSImage(data: data) {
+                    let isHighRes = Self.maxPixelDimension(of: nsImage) >= 96
                     ZStack {
-                        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(hex: instance.accentHex).opacity(0.9),
-                                        Color(hex: instance.accentHex)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFit()
-                            .padding(size * 0.16)
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .fill(Color.white)
+
+                        if isHighRes {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .interpolation(.high)
+                                .scaledToFill()
+                                .frame(width: size, height: size)
+                                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                        } else {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .interpolation(.high)
+                                .scaledToFit()
+                                .padding(size * 0.16)
+                        }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
+                    )
                 } else {
                     ZStack {
-                        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Color(hex: instance.accentHex).opacity(0.85),
+                                        Color(hex: instance.accentHex).opacity(0.88),
                                         Color(hex: instance.accentHex)
                                     ],
                                     startPoint: .topLeading,
@@ -219,8 +266,8 @@ struct AppInstanceAvatarView: View {
                                 )
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
                             )
 
                         if let symbol = instance.symbolName {
@@ -243,21 +290,29 @@ struct AppInstanceAvatarView: View {
             let badge = instance.badgeShortText.trimmingCharacters(in: .whitespacesAndNewlines)
             if showBadgePill && !badge.isEmpty {
                 Text(String(badge.prefix(4)).uppercased())
-                    .font(.system(size: max(8, size * 0.22), weight: .heavy, design: .rounded))
+                    .font(.system(size: max(8, size * 0.24), weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
+                    .padding(.horizontal, 3.5)
+                    .padding(.vertical, 0.5)
                     .background(
                         Capsule()
                             .fill(Color(nsColor: .windowBackgroundColor))
-                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                            .shadow(color: .black.opacity(0.2), radius: 1.5, y: 0.5)
                     )
                     .overlay(
                         Capsule()
-                            .strokeBorder(Color(hex: instance.accentHex), lineWidth: 1.2)
+                            .strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.8)
                     )
-                    .offset(x: 4, y: 3)
+                    .offset(x: 3, y: 2)
             }
         }
+    }
+
+    private static func maxPixelDimension(of image: NSImage) -> Int {
+        var m = Int(max(image.size.width, image.size.height))
+        for rep in image.representations {
+            m = max(m, max(rep.pixelsWide, rep.pixelsHigh))
+        }
+        return m
     }
 }

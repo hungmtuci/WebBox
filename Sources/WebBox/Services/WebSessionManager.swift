@@ -327,9 +327,13 @@ final class WebSessionManager: NSObject, ObservableObject {
         return controller.webView
     }
 
-    func reload(instanceID: UUID) {
+    func reload(instanceID: UUID, fromOrigin: Bool = false) {
         if let ctrl = instanceControllers[instanceID] {
-            ctrl.webView.reload()
+            if fromOrigin {
+                ctrl.webView.reloadFromOrigin()
+            } else {
+                ctrl.webView.reload()
+            }
         } else if let inst = WorkspaceStore.shared.instance(for: instanceID) {
             _ = webView(for: inst)
         }
@@ -877,6 +881,30 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
         manager?.attachDownload(download, sourceTitle: instance.displayTitle)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Fallback: If an internal/private site still has no icon, extract the live <link rel="icon"> URL from DOM
+        guard WorkspaceStore.shared.instance(for: instance.id)?.customIconPNGData == nil else { return }
+        let js = """
+        (function() {
+            const links = Array.from(document.querySelectorAll('link[rel*="icon"]'));
+            const touch = links.find(l => (l.rel || '').toLowerCase().includes('apple-touch-icon') && l.href);
+            if (touch) return touch.href;
+            const first = links.find(l => l.href);
+            return first ? first.href : '';
+        })();
+        """
+        let instID = instance.id
+        webView.evaluateJavaScript(js) { result, _ in
+            guard let href = result as? String, !href.isEmpty, let iconURL = URL(string: href) else { return }
+            Task { @MainActor in
+                guard WorkspaceStore.shared.instance(for: instID)?.customIconPNGData == nil else { return }
+                if let png = await AppIconFetcher.shared.downloadAndNormalizeIcon(from: iconURL, minPixelDimension: 24) {
+                    WorkspaceStore.shared.updateIconSilently(instanceID: instID, pngData: png)
+                }
+            }
+        }
     }
 
     // MARK: - WKUIDelegate (target="_blank", window.open, File Upload, Media, Dialogs)

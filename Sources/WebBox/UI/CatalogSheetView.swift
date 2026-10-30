@@ -91,6 +91,7 @@ final class CatalogUIState: ObservableObject {
 struct CatalogSheetView: View {
     @ObservedObject var store = WorkspaceStore.shared
     @ObservedObject var ui = CatalogUIState.shared
+    @ObservedObject var iconFetcher = AppIconFetcher.shared
     @Environment(\.dismiss) private var dismiss
 
     private let accentPalette = [
@@ -99,39 +100,50 @@ struct CatalogSheetView: View {
         "#611F69", "#5865F2", "#E1306C", "#2F3437"
     ]
 
+    private var categorySelectionBinding: Binding<CatalogCategory?> {
+        Binding(
+            get: { ui.selectedCategory },
+            set: { newCat in
+                if let newCat {
+                    ui.selectedCategory = newCat
+                }
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            // Native macOS Sheet Header Bar
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Thêm Ứng Dụng & Tài Khoản Mới")
-                        .font(.title3.weight(.bold))
-                    Text("Mỗi tài khoản mới tự động có vùng lưu trữ Cookie & phiên đăng nhập độc lập 100%")
+                        .font(.headline)
+                    Text("Mỗi tài khoản mới tự động có vùng lưu trữ Cookie & phiên đăng nhập độc lập")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                Picker("", selection: $ui.selectedMode) {
-                    ForEach(CatalogUIState.ModeTab.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+                if ui.configuringPreset == nil {
+                    Picker("", selection: $ui.selectedMode) {
+                        ForEach(CatalogUIState.ModeTab.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 390)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 400)
 
-                Button {
+                Button("Đóng") {
                     dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 16)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 13)
+            .background(.bar)
 
             Divider()
 
@@ -150,6 +162,7 @@ struct CatalogSheetView: View {
         .frame(width: 880, height: 620)
         .onAppear {
             ui.resetForOpen(store: store)
+            AppIconFetcher.shared.preloadCatalogIconsIfNeeded()
         }
     }
 
@@ -169,57 +182,39 @@ struct CatalogSheetView: View {
 
     private var catalogDirectoryBody: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(CatalogCategory.allCases) { cat in
-                    let isSelected = ui.selectedCategory == cat
-                    Button {
-                        ui.selectedCategory = cat
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: cat.symbolName)
-                                .frame(width: 18)
-                                .foregroundStyle(isSelected ? .white : .accentColor)
-                            Text(cat.rawValue)
-                                .font(.callout.weight(isSelected ? .semibold : .regular))
-                                .foregroundStyle(isSelected ? .white : .primary)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(isSelected ? Color.accentColor : Color.clear)
-                        )
+            // Left Native Sidebar List for Categories
+            List(selection: categorySelectionBinding) {
+                Section("Danh mục") {
+                    ForEach(CatalogCategory.allCases) { cat in
+                        Label(cat.rawValue, systemImage: cat.symbolName)
+                            .tag(cat)
                     }
-                    .buttonStyle(.plain)
                 }
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Không thấy web bạn cần?", systemImage: "globe.badge.chevron.backward")
-                        .font(.caption.weight(.semibold))
-                    Text("Bạn có thể biến bất kỳ trang web, CRM nội bộ hoặc công cụ nào thành ứng dụng Desktop riêng.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Button("Nhập URL bất kỳ...") {
-                        ui.selectedMode = .customURL
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.09))
-                )
             }
-            .padding(14)
+            .listStyle(.sidebar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Không thấy trang web cần tìm?")
+                            .font(.caption.weight(.semibold))
+                        Button {
+                            ui.selectedMode = .customURL
+                        } label: {
+                            Label("Nhập URL bất kỳ...", systemImage: "globe")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(12)
+                }
+                .background(.bar)
+            }
             .frame(width: 215)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
 
             Divider()
 
+            // Right Search + App Cards Grid
             VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -236,15 +231,15 @@ struct CatalogSheetView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color(nsColor: .textBackgroundColor))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -276,17 +271,17 @@ struct CatalogSheetView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(preset.name)
-                            .font(.callout.weight(.bold))
+                            .font(.callout.weight(.semibold))
                         if existingCount > 0 {
                             Text("\(existingCount) nick")
-                                .font(.caption2.weight(.bold))
+                                .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.blue)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.blue.opacity(0.14)))
                         } else if preset.recommendedMultiAccount {
                             Text("Đa tài khoản")
-                                .font(.caption2.weight(.medium))
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
@@ -310,18 +305,17 @@ struct CatalogSheetView: View {
                         existingCount == 0 ? "Thêm ngay" : "Thêm tài khoản #\(existingCount + 1)",
                         systemImage: "plus.circle.fill"
                     )
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.medium))
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color(hex: preset.accentHex))
                 .controlSize(.small)
 
                 Button {
                     ui.configuringPreset = preset
                 } label: {
-                    Label("Tuỳ chỉnh / .app", systemImage: "slider.horizontal.3")
-                        .font(.caption.weight(.medium))
+                    Label("Tuỳ chỉnh", systemImage: "slider.horizontal.3")
+                        .font(.caption)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -329,12 +323,12 @@ struct CatalogSheetView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
         )
     }
 
@@ -345,19 +339,20 @@ struct CatalogSheetView: View {
         let inst = preset.makeInstance(
             accountLabel: label,
             badgeShortText: badge,
-            spaceID: store.selectedSpaceID
+            spaceID: store.selectedSpaceID,
+            customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
         )
         store.addInstance(inst)
         dismiss()
     }
 
-    // MARK: - Custom Website Builder View
+    // MARK: - Custom Website Builder View (Native Grouped Form)
 
     private var customWebsiteBuilderBody: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 18) {
-                    VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            Form {
+                Section("Trang web & Biểu tượng ứng dụng") {
+                    HStack(spacing: 16) {
                         let previewInst = WebAppInstance(
                             name: ui.customAppName.isEmpty ? "Web" : ui.customAppName,
                             accountLabel: ui.customAccountLabel,
@@ -367,22 +362,15 @@ struct CatalogSheetView: View {
                             monogram: String((ui.customAppName.isEmpty ? "W" : ui.customAppName).prefix(2)).uppercased(),
                             customIconPNGData: ui.customIconData
                         )
-                        AppInstanceAvatarView(instance: previewInst, size: 74)
+                        AppInstanceAvatarView(instance: previewInst, size: 60)
 
-                        Button("Chọn ảnh Icon...") {
-                            chooseCustomIconImage()
-                        }
-                        .controlSize(.small)
-                    }
-                    .frame(width: 120)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Địa chỉ trang web (URL)")
-                                .font(.caption.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 8) {
-                                TextField("Ví dụ: https://chat.zalo.me hoặc crm.congty.vn", text: $ui.customURLInput)
+                                TextField("Địa chỉ URL (VD: chat.zalo.me hoặc crm.congty.vn)", text: $ui.customURLInput)
                                     .textFieldStyle(.roundedBorder)
+                                    .onSubmit {
+                                        Task { await fetchSiteTitleAndFavicon() }
+                                    }
 
                                 Button {
                                     Task { await fetchSiteTitleAndFavicon() }
@@ -390,137 +378,99 @@ struct CatalogSheetView: View {
                                     if ui.isFetchingMetadata {
                                         ProgressView().controlSize(.small)
                                     } else {
-                                        Label("Lấy tên & Icon", systemImage: "sparkles")
+                                        Label("Tự lấy Tên & Icon", systemImage: "sparkles")
                                     }
                                 }
                                 .disabled(ui.customURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ui.isFetchingMetadata)
                             }
-                        }
 
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Tên ứng dụng")
-                                    .font(.caption.weight(.semibold))
-                                TextField("VD: CRM Nội Bộ, Gmail, Zalo...", text: $ui.customAppName)
-                                    .textFieldStyle(.roundedBorder)
-                            }
+                            HStack(spacing: 8) {
+                                Button("Chọn ảnh Icon từ máy...") {
+                                    chooseCustomIconImage()
+                                }
+                                .controlSize(.small)
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Nhãn tài khoản (Phân biệt nhiều nick)")
-                                    .font(.caption.weight(.semibold))
-                                TextField("VD: Cá nhân, Công ty, Sale 1...", text: $ui.customAccountLabel)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Huy hiệu góc Icon")
-                                    .font(.caption.weight(.semibold))
-                                TextField("VD: 1, 2, CV", text: $ui.customBadgeText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 95)
-                            }
-                        }
-                    }
-                }
-
-                Divider()
-
-                HStack(alignment: .top, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Màu nhận diện thương hiệu")
-                            .font(.caption.weight(.semibold))
-                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 8), count: 6), spacing: 8) {
-                            ForEach(accentPalette, id: \.self) { hex in
-                                Circle()
-                                    .fill(Color(hex: hex))
-                                    .frame(width: 24, height: 24)
-                                    .overlay(
-                                        Circle()
-                                            .strokeBorder(.white, lineWidth: ui.customAccentHex == hex ? 2.5 : 0)
-                                    )
-                                    .shadow(radius: 1)
-                                    .onTapGesture {
-                                        ui.customAccentHex = hex
+                                if ui.customIconData != nil {
+                                    Button("Xoá ảnh đã chọn") {
+                                        ui.customIconData = nil
                                     }
+                                    .controlSize(.small)
+                                }
+
+                                Spacer()
+
+                                HStack(spacing: 5) {
+                                    ForEach(accentPalette.prefix(8), id: \.self) { hex in
+                                        Circle()
+                                            .fill(Color(hex: hex))
+                                            .frame(width: 16, height: 16)
+                                            .overlay(
+                                                Circle().strokeBorder(.white, lineWidth: ui.customAccentHex == hex ? 2 : 0)
+                                            )
+                                            .onTapGesture {
+                                                ui.customAccentHex = hex
+                                            }
+                                    }
+                                }
                             }
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Khi bấm đường link trong tin nhắn / trang web:")
-                                .font(.caption.weight(.semibold))
-                            Picker("", selection: $ui.customLinkMode) {
-                                ForEach(LinkRoutingMode.allCases) { mode in
-                                    Text(mode.title).tag(mode)
-                                }
-                            }
-                            .labelsHidden()
-                        }
+                    TextField("Tên ứng dụng:", text: $ui.customAppName, prompt: Text("VD: CRM Nội Bộ, Gmail, Zalo..."))
+                    TextField("Nhãn tài khoản:", text: $ui.customAccountLabel, prompt: Text("VD: Cá nhân, Công ty, Sale 1..."))
+                    TextField("Huy hiệu góc Icon:", text: $ui.customBadgeText, prompt: Text("VD: 1, 2, CV (Không bắt buộc)"))
+                }
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Thuộc Không gian (Space):")
-                                .font(.caption.weight(.semibold))
-                            Picker("", selection: $ui.customSpaceID) {
-                                Text("Không phân nhóm (Hiện ở Tất cả)").tag(UUID?.none)
-                                ForEach(store.spaces) { sp in
-                                    Text(sp.name).tag(UUID?.some(sp.id))
-                                }
-                            }
-                            .labelsHidden()
+                Section("Phân nhóm & Chế độ mở đường link") {
+                    Picker("Khi bấm link trong tin nhắn:", selection: $ui.customLinkMode) {
+                        ForEach(LinkRoutingMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+
+                    Picker("Không gian (Space):", selection: $ui.customSpaceID) {
+                        Text("Hiện ở Tất cả").tag(UUID?.none)
+                        ForEach(store.spaces) { sp in
+                            Text(sp.name).tag(UUID?.some(sp.id))
                         }
                     }
                 }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(isOn: $ui.customExportDedicatedApp) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Đồng thời xuất thành ứng dụng macOS độc lập (.app) giống WebCatalog")
-                                .font(.callout.weight(.semibold))
-                            Text("Tạo tệp .app riêng trong ~/Applications với Icon & phiên đăng nhập riêng để mở từ Spotlight hoặc thanh Dock")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
+                Section("Dedicated Desktop App (.app)") {
+                    Toggle("Đồng thời xuất thành tệp ứng dụng .app riêng trong ~/Applications", isOn: $ui.customExportDedicatedApp)
                     if ui.customExportDedicatedApp {
-                        Toggle("Ghim luôn ứng dụng này vào thanh Dock của macOS", isOn: $ui.customPinToDock)
-                            .font(.caption)
-                            .padding(.leading, 22)
+                        Toggle("Ghim ứng dụng này vào thanh Dock của macOS", isOn: $ui.customPinToDock)
                     }
                 }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
 
                 if let err = ui.errorMessage {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                HStack {
-                    Spacer()
-                    Button("Huỷ") {
-                        dismiss()
+                    Section {
+                        Text(err)
+                            .foregroundStyle(.red)
+                            .font(.caption)
                     }
-                    Button {
-                        createCustomWebsiteApp()
-                    } label: {
-                        Label(
-                            ui.customExportDedicatedApp ? "Tạo trong Workspace & Xuất .app" : "Thêm vào Workspace",
-                            systemImage: "checkmark.circle.fill"
-                        )
-                        .padding(.horizontal, 8)
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(24)
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Huỷ") {
+                    dismiss()
+                }
+                Button {
+                    createCustomWebsiteApp()
+                } label: {
+                    Text(ui.customExportDedicatedApp ? "Tạo & Xuất .app" : "Thêm vào WebBox")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.bar)
         }
     }
 
@@ -571,12 +521,12 @@ struct CatalogSheetView: View {
             }
         } catch {}
 
-        if let host = normalized.host,
-           let iconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=128") {
-            if let (iconBytes, _) = try? await URLSession.shared.data(from: iconURL),
-               NSImage(data: iconBytes) != nil {
-                ui.customIconData = iconBytes
-            }
+        if let iconBytes = await AppIconFetcher.shared.fetchBestIcon(
+            catalogID: nil,
+            appName: ui.customAppName,
+            siteURL: normalized
+        ) {
+            ui.customIconData = iconBytes
         }
     }
 
@@ -618,7 +568,7 @@ struct CatalogSheetView: View {
     }
 }
 
-// MARK: - Preset Customization Step
+// MARK: - Preset Customization Step (Native Grouped Form)
 
 private struct PresetConfigurationDetailView: View {
     let preset: CatalogAppPreset
@@ -627,79 +577,50 @@ private struct PresetConfigurationDetailView: View {
 
     @ObservedObject var store = WorkspaceStore.shared
     @ObservedObject var ui = CatalogUIState.shared
+    @ObservedObject var iconFetcher = AppIconFetcher.shared
 
     var body: some View {
         let previewInstance = preset.makeInstance(
             accountLabel: ui.presetAccountLabel,
-            badgeShortText: ui.presetBadgeShortText
+            badgeShortText: ui.presetBadgeShortText,
+            customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
         )
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Button {
-                    onBack()
-                } label: {
-                    Label("Quay lại kho ứng dụng", systemImage: "chevron.left")
-                        .font(.callout.weight(.medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-
-                HStack(spacing: 16) {
-                    AppInstanceAvatarView(instance: previewInstance, size: 68)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Cấu hình \(preset.name)")
-                            .font(.title3.weight(.bold))
-                        Text(preset.baseURLString)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Text(preset.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Nhãn phân biệt tài khoản")
-                            .font(.caption.weight(.semibold))
-                        TextField("VD: Cá nhân, Công việc, Nick Bán Hàng...", text: $ui.presetAccountLabel)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Ký hiệu góc Icon (Hiện cả trên Dock)")
-                            .font(.caption.weight(.semibold))
-                        TextField("VD: 1, 2, CV, SALE", text: $ui.presetBadgeShortText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 150)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Không gian (Space)")
-                            .font(.caption.weight(.semibold))
-                        Picker("", selection: $ui.presetSelectedSpaceID) {
-                            Text("Tất cả").tag(UUID?.none)
-                            ForEach(store.spaces) { sp in
-                                Text(sp.name).tag(UUID?.some(sp.id))
-                            }
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    HStack(spacing: 14) {
+                        AppInstanceAvatarView(instance: previewInstance, size: 56)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(preset.name)
+                                .font(.title3.weight(.semibold))
+                            Text(preset.baseURLString)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            Text(preset.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .labelsHidden()
-                        .frame(width: 170)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Cô lập phiên đăng nhập (Multi-Account Session)")
-                        .font(.caption.weight(.semibold))
+                Section("Nhận diện tài khoản") {
+                    TextField("Nhãn phân biệt tài khoản:", text: $ui.presetAccountLabel, prompt: Text("VD: Cá nhân, Công việc, Nick Bán Hàng..."))
+                    TextField("Ký hiệu góc Icon:", text: $ui.presetBadgeShortText, prompt: Text("VD: 1, 2, CV"))
 
-                    Picker("", selection: $ui.presetUseSharedProfile) {
-                        Text("Tạo phiên độc lập hoàn toàn mới (Đăng nhập tài khoản riêng)").tag(false)
-                        Text("Dùng chung phiên Cookie với một tài khoản khác (VD: chung Facebook & Messenger)").tag(true)
+                    Picker("Không gian (Space):", selection: $ui.presetSelectedSpaceID) {
+                        Text("Tất cả").tag(UUID?.none)
+                        ForEach(store.spaces) { sp in
+                            Text(sp.name).tag(UUID?.some(sp.id))
+                        }
                     }
-                    .pickerStyle(.radioGroup)
+                }
+
+                Section("Phiên đăng nhập & Cookie") {
+                    Picker("Chế độ cô lập Cookie:", selection: $ui.presetUseSharedProfile) {
+                        Text("Tạo phiên độc lập hoàn toàn mới (Khuyên dùng)").tag(false)
+                        Text("Dùng chung Cookie với tài khoản có sẵn (VD: chung FB & Messenger)").tag(true)
+                    }
 
                     if ui.presetUseSharedProfile && !store.profiles.isEmpty {
                         Picker("Chọn phiên dùng chung:", selection: $ui.presetSelectedSharedProfileID) {
@@ -707,89 +628,70 @@ private struct PresetConfigurationDetailView: View {
                                 Text(prof.name).tag(UUID?.some(prof.id))
                             }
                         }
-                        .padding(.leading, 20)
                     }
                 }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Khi bấm đường link trong tin nhắn:")
-                        .font(.caption.weight(.semibold))
-                    Picker("", selection: $ui.presetLinkRoutingMode) {
+                Section("Mở đường link & Xuất ứng dụng độc lập") {
+                    Picker("Khi bấm đường link trong tin nhắn:", selection: $ui.presetLinkRoutingMode) {
                         ForEach(LinkRoutingMode.allCases) { mode in
-                            Text("\(mode.title) — \(mode.subtitle)").tag(mode)
+                            Text(mode.title).tag(mode)
                         }
                     }
-                    .labelsHidden()
-                }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(isOn: $ui.presetExportDedicatedApp) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Xuất thành ứng dụng macOS độc lập (.app) trong ~/Applications")
-                                .font(.callout.weight(.semibold))
-                            Text("Giống WebCatalog Dedicated Desktop Apps — chạy riêng trên thanh Dock, mở bằng Spotlight")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    Toggle("Xuất thành ứng dụng macOS độc lập (.app) trong ~/Applications", isOn: $ui.presetExportDedicatedApp)
 
                     if ui.presetExportDedicatedApp {
-                        HStack(spacing: 20) {
-                            Toggle("Ghim vào thanh Dock macOS", isOn: $ui.presetPinDedicatedToDock)
-                            Toggle("Khởi chạy ngay sau khi tạo", isOn: $ui.presetLaunchDedicatedImmediately)
-                        }
-                        .font(.caption)
-                        .padding(.leading, 22)
+                        Toggle("Ghim vào thanh Dock macOS", isOn: $ui.presetPinDedicatedToDock)
+                        Toggle("Khởi chạy ngay sau khi tạo", isOn: $ui.presetLaunchDedicatedImmediately)
                     }
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.08))
-                )
-
-                HStack {
-                    Spacer()
-                    Button("Huỷ") { onBack() }
-                    Button {
-                        let chosenProfileID: UUID
-                        if ui.presetUseSharedProfile, let shared = ui.presetSelectedSharedProfileID {
-                            chosenProfileID = shared
-                        } else {
-                            chosenProfileID = UUID()
-                        }
-                        let inst = preset.makeInstance(
-                            accountLabel: ui.presetAccountLabel.trimmingCharacters(in: .whitespacesAndNewlines),
-                            badgeShortText: ui.presetBadgeShortText.trimmingCharacters(in: .whitespacesAndNewlines),
-                            spaceID: ui.presetSelectedSpaceID,
-                            profileID: chosenProfileID,
-                            linkRoutingMode: ui.presetLinkRoutingMode
-                        )
-                        let added = store.addInstance(inst)
-                        if ui.presetExportDedicatedApp {
-                            _ = try? store.exportDedicatedDesktopApp(
-                                for: added.id,
-                                launchAfterExport: ui.presetLaunchDedicatedImmediately,
-                                pinToDock: ui.presetPinDedicatedToDock
-                            )
-                        }
-                        onCreated()
-                    } label: {
-                        Label(
-                            ui.presetExportDedicatedApp ? "Tạo tài khoản & Xuất .app" : "Thêm tài khoản vào Workspace",
-                            systemImage: "plus.circle.fill"
-                        )
-                        .padding(.horizontal, 8)
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(24)
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Button {
+                    onBack()
+                } label: {
+                    Label("Quay lại kho ứng dụng", systemImage: "chevron.left")
+                }
+
+                Spacer()
+
+                Button {
+                    let chosenProfileID: UUID
+                    if ui.presetUseSharedProfile, let shared = ui.presetSelectedSharedProfileID {
+                        chosenProfileID = shared
+                    } else {
+                        chosenProfileID = UUID()
+                    }
+                    let inst = preset.makeInstance(
+                        accountLabel: ui.presetAccountLabel.trimmingCharacters(in: .whitespacesAndNewlines),
+                        badgeShortText: ui.presetBadgeShortText.trimmingCharacters(in: .whitespacesAndNewlines),
+                        spaceID: ui.presetSelectedSpaceID,
+                        profileID: chosenProfileID,
+                        linkRoutingMode: ui.presetLinkRoutingMode,
+                        customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
+                    )
+                    let added = store.addInstance(inst)
+                    if ui.presetExportDedicatedApp {
+                        _ = try? store.exportDedicatedDesktopApp(
+                            for: added.id,
+                            launchAfterExport: ui.presetLaunchDedicatedImmediately,
+                            pinToDock: ui.presetPinDedicatedToDock
+                        )
+                    }
+                    onCreated()
+                } label: {
+                    Text(ui.presetExportDedicatedApp ? "Tạo tài khoản & Xuất .app" : "Thêm tài khoản")
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.bar)
         }
     }
 }

@@ -7,7 +7,7 @@ enum WebBoxMain {
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
-        let delegate = WebBoxAppDelegate()
+        let delegate = WebBoxAppDelegate.shared
         app.delegate = delegate
         MainActor.assumeIsolated {
             delegate.installMainMenu()
@@ -18,10 +18,13 @@ enum WebBoxMain {
 
 @MainActor
 final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
+    /// Strongly retained singleton so weak `NSApp.delegate` and weak `NSMenuItem.target` never deallocate in `-O` Release builds!
+    static let shared = WebBoxAppDelegate()
+
     private var mainWindow: NSWindow?
+    private var keyEventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Prevent duplicate running processes of the exact same bundle identifier
         if let bundleID = Bundle.main.bundleIdentifier {
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -34,7 +37,11 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         }
 
         UNUserNotificationCenter.current().delegate = self
+        installLocalShortcutMonitor()
         openOrFocusMainWindow()
+
+        // Automatically fetch genuine HD icons for any existing or starter accounts
+        AppIconFetcher.shared.backfillMissingIcons(in: WorkspaceStore.shared)
         UpdateCheckerService.shared.checkSilentlyOnLaunchIfNeeded()
     }
 
@@ -66,22 +73,22 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         let window = NSWindow(
             contentRect: defaultSize,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
 
-        let appDisplayTitle = store.isStandaloneMode
-            ? (store.activeInstance?.displayTitle ?? "WebBox App")
-            : "WebBox — Đa Tài Khoản & Dedicated Web Apps"
-        window.title = appDisplayTitle
-        window.minSize = NSSize(width: 780, height: 540)
+        window.title = store.isStandaloneMode
+            ? (store.activeInstance?.displayTitle ?? "WebBox")
+            : "WebBox"
+        window.toolbarStyle = .unified
+        window.minSize = NSSize(width: 820, height: 560)
         window.contentViewController = hostingController
         window.center()
 
         let autosaveKey = store.isStandaloneMode
-            ? "WebBoxStandalone_\(store.activeInstance?.id.uuidString ?? "default")"
-            : "WebBoxHubMainWindow"
+            ? "WebBoxStandaloneWin_\(store.activeInstance?.id.uuidString ?? "default")"
+            : "WebBoxNativeHubWindow_v2"
         window.setFrameAutosaveName(autosaveKey)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -91,7 +98,116 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: - UNUserNotificationCenterDelegate (Click notification -> Focus exact account!)
+    // MARK: - Local Keyboard Monitor (Guarantees Cmd+R, Cmd+\, Cmd+1..9 work even inside WKWebView!)
+
+    private func installLocalShortcutMonitor() {
+        guard keyEventMonitor == nil else { return }
+        keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.contains(.command), !flags.contains(.control) else {
+                return event
+            }
+            guard let chars = event.charactersIgnoringModifiers?.lowercased(), !chars.isEmpty else {
+                return event
+            }
+
+            let store = WorkspaceStore.shared
+
+            // 1. Cmd + R / Cmd + Shift + R -> Reload active WebView (or In-App Browser if full overlay)
+            if chars == "r" {
+                if flags == [.command] {
+                    self.performReload(fromOrigin: false)
+                    return nil
+                } else if flags == [.command, .shift] {
+                    self.performReload(fromOrigin: true)
+                    return nil
+                }
+            }
+
+            // 2. Cmd + \ or Cmd + Shift + S -> Toggle Left Sidebar
+            if !store.isStandaloneMode {
+                if (chars == "\\" && flags == [.command]) || (chars == "s" && flags == [.command, .shift]) {
+                    store.toggleLeftSidebar()
+                    return nil
+                }
+            }
+
+            // 3. Cmd + 1 ... Cmd + 9 -> Quick switch account
+            if !store.isStandaloneMode && flags == [.command],
+               let digit = Int(chars), (1...9).contains(digit) {
+                store.selectInstanceByIndex(digit - 1)
+                return nil
+            }
+
+            // 4. Cmd + F -> Find in Page
+            if chars == "f" && flags == [.command] {
+                store.isFindBarVisible.toggle()
+                return nil
+            }
+
+            // 5. Cmd + [ / Cmd + ] -> Back / Forward
+            if chars == "[" && flags == [.command] {
+                self.goBackAction()
+                return nil
+            }
+            if chars == "]" && flags == [.command] {
+                self.goForwardAction()
+                return nil
+            }
+
+            // 6. Cmd + (+ / = / - / 0) -> Page Zoom
+            if (chars == "=" || chars == "+") && (flags == [.command] || flags == [.command, .shift]) {
+                self.zoomInAction()
+                return nil
+            }
+            if chars == "-" && flags == [.command] {
+                self.zoomOutAction()
+                return nil
+            }
+            if chars == "0" && flags == [.command] {
+                self.zoomResetAction()
+                return nil
+            }
+
+            // 7. Cmd + N / Cmd + Shift + N / Cmd + , / Cmd + U
+            if !store.isStandaloneMode {
+                if chars == "n" && flags == [.command] {
+                    self.openCatalogAction()
+                    return nil
+                }
+                if chars == "n" && flags == [.command, .shift] {
+                    self.cloneCurrentAccountAction()
+                    return nil
+                }
+                if chars == "u" && flags == [.command] {
+                    self.checkForGitHubUpdatesAction()
+                    return nil
+                }
+            }
+            if chars == "," && flags == [.command] {
+                self.openPreferencesAction()
+                return nil
+            }
+
+            return event
+        }
+    }
+
+    private func performReload(fromOrigin: Bool) {
+        let store = WorkspaceStore.shared
+        if store.isInAppBrowserVisible && store.preferences.inAppBrowserLayout == .fullOverlay,
+           let tab = store.activeInAppTab {
+            WebSessionManager.shared.reloadInAppTab(tabID: tab.id)
+            store.showToast("Đang tải lại trang trong trình duyệt App...")
+            return
+        }
+        guard let id = store.activeInstanceID else { return }
+        WebSessionManager.shared.reload(instanceID: id, fromOrigin: fromOrigin)
+        store.showToast(fromOrigin ? "Đang tải lại hoàn toàn (bỏ qua bộ nhớ đệm)..." : "Đang tải lại trang...")
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -243,7 +359,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         )
         fileMenuItem.submenu = fileMenu
 
-        // 3. Edit Menu (Essential for Cmd+C / Cmd+V / Cmd+A / Undo inside WKWebView!)
+        // 3. Edit Menu
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
         let editMenu = NSMenu(title: "Chỉnh sửa")
@@ -267,7 +383,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // 4. View & Navigation Menu
         let viewMenuItem = NSMenuItem()
         mainMenu.addItem(viewMenuItem)
-        let viewMenu = NSMenu(title: "Điều hướng & Hiển thị")
+        let viewMenu = NSMenu(title: "Hiển thị")
 
         let reloadItem = viewMenu.addItem(
             withTitle: "Tải lại trang",
@@ -275,6 +391,14 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             keyEquivalent: "r"
         )
         reloadItem.target = self
+
+        let hardReloadItem = viewMenu.addItem(
+            withTitle: "Tải lại trang (Bỏ qua bộ nhớ đệm)",
+            action: #selector(hardReloadActiveAction),
+            keyEquivalent: "R"
+        )
+        hardReloadItem.keyEquivalentModifierMask = [.command, .shift]
+        hardReloadItem.target = self
 
         let backItem = viewMenu.addItem(
             withTitle: "Quay lại",
@@ -313,48 +437,21 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         )
         zoomReset.target = self
 
-        if store.isStandaloneMode {
-            viewMenu.addItem(.separator())
-            let toggleBar = viewMenu.addItem(
-                withTitle: "Ẩn / Hiện thanh công cụ trên cùng",
-                action: #selector(toggleStandaloneToolbarAction),
-                keyEquivalent: "b"
-            )
-            toggleBar.keyEquivalentModifierMask = [.command, .shift]
-            toggleBar.target = self
-        }
-
         if !store.isStandaloneMode {
             viewMenu.addItem(.separator())
 
             let toggleSidebarItem = viewMenu.addItem(
-                withTitle: "Ẩn / Hiện menu bên trái",
+                withTitle: "Ẩn / Hiện thanh bên trái",
                 action: #selector(toggleLeftSidebarAction),
                 keyEquivalent: "\\"
             )
             toggleSidebarItem.keyEquivalentModifierMask = [.command]
             toggleSidebarItem.target = self
 
-            let toggleSidebarAltItem = viewMenu.addItem(
-                withTitle: "Ẩn / Hiện menu bên trái (Phím tắt phụ)",
-                action: #selector(toggleLeftSidebarAction),
-                keyEquivalent: "s"
-            )
-            toggleSidebarAltItem.keyEquivalentModifierMask = [.command, .shift]
-            toggleSidebarAltItem.target = self
-
-            let compactSidebarItem = viewMenu.addItem(
-                withTitle: "Thu gọn / Mở rộng nhãn menu bên trái (Chỉ hiện Icon)",
-                action: #selector(toggleCompactSidebarAction),
-                keyEquivalent: "s"
-            )
-            compactSidebarItem.keyEquivalentModifierMask = [.command, .option]
-            compactSidebarItem.target = self
-
             viewMenu.addItem(.separator())
             for num in 1...9 {
                 let swItem = viewMenu.addItem(
-                    withTitle: "Chuyển nhanh sang Tài khoản #\(num)",
+                    withTitle: "Chuyển sang Tài khoản #\(num)",
                     action: #selector(switchAccountShortcut(_:)),
                     keyEquivalent: "\(num)"
                 )
@@ -417,8 +514,11 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     @objc private func reloadActiveAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
-        WebSessionManager.shared.reload(instanceID: id)
+        performReload(fromOrigin: false)
+    }
+
+    @objc private func hardReloadActiveAction() {
+        performReload(fromOrigin: true)
     }
 
     @objc private func goBackAction() {
@@ -446,16 +546,8 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         WebSessionManager.shared.adjustZoom(instanceID: id, delta: 0, reset: true)
     }
 
-    @objc private func toggleStandaloneToolbarAction() {
-        WorkspaceStore.shared.showStandaloneToolbar.toggle()
-    }
-
     @objc private func toggleLeftSidebarAction() {
         WorkspaceStore.shared.toggleLeftSidebar()
-    }
-
-    @objc private func toggleCompactSidebarAction() {
-        WorkspaceStore.shared.toggleSidebarCompactMode()
     }
 
     @objc private func switchAccountShortcut(_ sender: NSMenuItem) {

@@ -36,10 +36,13 @@
   1. **Hỏi nhanh mỗi khi bấm link**: Hiện bảng chọn tức thì giữa **Mở trong Trình duyệt App** và **Mở bằng Trình duyệt ngoài** (Safari, Chrome, Cốc Cốc, Arc, Edge, Firefox...).
   2. **Mở bằng Trình duyệt tích hợp trong App (In-App Browser)**: Hỗ trợ mở nhiều tab ngay cạnh khung chat (**Chia đôi cạnh bên** vừa đọc link vừa nhắn tin, hoặc **Toàn khung**), kèm nút **Mở ngoài ↗** bất cứ lúc nào.
   3. **Mở bằng Trình duyệt ngoài**: Tự động đẩy sang trình duyệt mặc định macOS hoặc trình duyệt chỉ định riêng cho tài khoản đó.
-- **Phím tắt nhanh khi bấm link**:
-  - Giữ `⌘ + Click` (hoặc chuột giữa): Mở ngay trong **Trình duyệt tích hợp của App**.
-  - Giữ `⌥ + Click`: Mở ngay bằng **Trình duyệt ngoài**.
-  - **Chuột phải vào bất kỳ link nào**: Chọn mở trong App, mở bằng trình duyệt bất kỳ trên máy, hoặc sao chép link sạch.
+- **Phím tắt tiện lợi chuẩn macOS**:
+  - `⌘R` / `⌘⇧R`: Tải lại trang hiện tại / Tải lại hoàn toàn bỏ qua bộ nhớ đệm.
+  - `⌘\` hoặc `⌘⇧S`: Ẩn / Hiện thanh bên trái (Sidebar).
+  - `⌘1` … `⌘9`: Chuyển nhanh giữa các tài khoản.
+  - `⌘N` / `⌘⇧N`: Thêm ứng dụng mới / Nhân bản nhanh tài khoản đang mở.
+  - `⌘F`: Tìm nội dung trong trang • `⌘+` / `⌘-` / `⌘0`: Thu phóng trang • `⌘U`: Kiểm tra cập nhật GitHub.
+  - Giữ `⌘ + Click` (mở link trong App) • `⌥ + Click` (mở link bằng trình duyệt ngoài).
 
 ---
 
@@ -52,5 +55,5 @@ chmod +x build_webbox.sh
 
 Sau khi chạy xong:
 - Ứng dụng hoàn chỉnh: `WebBox.app`
-- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.0.dmg`
-- Bản nén ZIP: `dist/WebBox-v1.0.0-macOS.zip`
+- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.2.dmg`
+- Bản nén ZIP: `dist/WebBox-v1.0.2-macOS.zip`

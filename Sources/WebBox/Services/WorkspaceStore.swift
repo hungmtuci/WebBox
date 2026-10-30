@@ -279,10 +279,20 @@ final class WorkspaceStore: ObservableObject {
             )
         }
 
+        if item.customIconPNGData == nil,
+           let cid = item.catalogID,
+           let cached = AppIconFetcher.shared.cachedIcon(forPresetID: cid) {
+            item.customIconPNGData = cached
+        }
+
         instances.append(item)
         activeInstanceID = item.id
         save()
         showToast("Đã thêm \(item.displayTitle)")
+
+        if item.customIconPNGData == nil {
+            AppIconFetcher.shared.backfillMissingIcons(in: self)
+        }
         return item
     }
 
@@ -316,7 +326,16 @@ final class WorkspaceStore: ObservableObject {
         selectInstance(cloned.id)
         save()
         showToast("Đã tạo \(cloned.displayTitle) (Phiên đăng nhập độc lập mới)")
+        if cloned.customIconPNGData == nil {
+            AppIconFetcher.shared.backfillMissingIcons(in: self)
+        }
         return cloned
+    }
+
+    func updateIconSilently(instanceID: UUID, pngData: Data) {
+        guard let idx = instances.firstIndex(where: { $0.id == instanceID }) else { return }
+        instances[idx].customIconPNGData = pngData
+        save()
     }
 
     func updateInstance(_ updated: WebAppInstance) {
