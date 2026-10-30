@@ -512,6 +512,9 @@ final class WorkspaceStore: ObservableObject {
         modifierOverride: ClickModifierOverride = .none
     ) {
         let scheme = rawURL.scheme?.lowercased() ?? ""
+        if scheme == "blob" || scheme == "data" || scheme == "javascript" || scheme == "about" {
+            return
+        }
         guard scheme == "http" || scheme == "https" else {
             NSWorkspace.shared.open(rawURL)
             return

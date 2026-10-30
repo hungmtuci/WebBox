@@ -36,6 +36,9 @@
   1. **Hỏi nhanh mỗi khi bấm link**: Hiện bảng chọn tức thì giữa **Mở trong Trình duyệt App** và **Mở bằng Trình duyệt ngoài** (Safari, Chrome, Cốc Cốc, Arc, Edge, Firefox...).
   2. **Mở bằng Trình duyệt tích hợp trong App (In-App Browser)**: Hỗ trợ mở nhiều tab ngay cạnh khung chat (**Chia đôi cạnh bên** vừa đọc link vừa nhắn tin, hoặc **Toàn khung**), kèm nút **Mở ngoài ↗** bất cứ lúc nào.
   3. **Mở bằng Trình duyệt ngoài**: Tự động đẩy sang trình duyệt mặc định macOS hoặc trình duyệt chỉ định riêng cho tài khoản đó.
+- **Menu chuột phải chuẩn macOS trên Hình ảnh, Tệp & Đường link** (kể cả ảnh `blob:` / WebP mã hoá trong Zalo, Messenger, Telegram):
+  - **Mở hình ảnh trong cửa sổ mới** (cửa sổ xem ảnh riêng hỗ trợ Pinch-to-Zoom, Xem trước Preview), **Tải về hình ảnh**, **Lưu hình ảnh thành...**, **Sao chép hình ảnh**, **Sao chép chủ thể (AI Vision tách nền)**, **Chia sẻ...** (AirDrop, Tin nhắn, Mail, Ảnh) và **Tải về tệp được liên kết**.
+  - Cho phép tuỳ chỉnh **thư mục lưu tải xuống** và bấm trực tiếp vào thông báo tải xong để **hiện ngay tệp trên Finder**.
 - **Phím tắt tiện lợi chuẩn macOS**:
   - `⌘R` / `⌘⇧R`: Tải lại trang hiện tại / Tải lại hoàn toàn bỏ qua bộ nhớ đệm.
   - `⌘⌥S`: Thu gọn / Mở rộng thanh bên trái dạng chỉ hiện biểu tượng Icon (Compact Rail).
@@ -56,5 +59,5 @@ chmod +x build_webbox.sh
 
 Sau khi chạy xong:
 - Ứng dụng hoàn chỉnh: `WebBox.app`
-- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.3.dmg`
-- Bản nén ZIP: `dist/WebBox-v1.0.3-macOS.zip`
+- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.4.dmg`
+- Bản nén ZIP: `dist/WebBox-v1.0.4-macOS.zip`

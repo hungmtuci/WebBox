@@ -75,7 +75,7 @@ enum CatalogDirectory {
             accentHex: "#0068FF",
             monogram: "Z",
             symbolName: nil,
-            internalHostSuffixes: ["zalo.me", "zaloapp.com", "zadn.vn", "zing.vn"],
+            internalHostSuffixes: ["zalo.me", "zaloapp.com", "zadn.vn", "zdn.vn", "zing.vn"],
             recommendedMultiAccount: true,
             defaultKeepAwake: true
         ),

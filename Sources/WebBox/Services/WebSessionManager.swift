@@ -15,92 +15,483 @@ private final class WeakScriptMessageBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
-// MARK: - Custom WKWebView with Smart Link Context Menu
+// MARK: - Custom WKWebView with Native Image, Media & Smart Link Context Menu
 
 final class WebBoxWKWebView: WKWebView {
     var ownerInstanceID: UUID?
-    var lastContextLinkURL: URL?
+    var sourceTitleOverride: String?
+    var lastContextHit: ContextMenuHitSnapshot?
+    private var activeSharingPicker: NSSharingServicePicker?
+
+    private var resolvedSourceTitle: String {
+        if let sourceTitleOverride, !sourceTitleOverride.isEmpty {
+            return sourceTitleOverride
+        }
+        if let id = ownerInstanceID,
+           let inst = WorkspaceStore.shared.instance(for: id) {
+            return inst.displayTitle
+        }
+        return "WebBox"
+    }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
 
-        guard let linkURL = lastContextLinkURL,
-              let scheme = linkURL.scheme?.lowercased(),
-              (scheme == "http" || scheme == "https"),
-              let instanceID = ownerInstanceID else {
-            return
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let zoom = max(0.25, pageZoom)
+        let topDownY = isFlipped ? viewPoint.y : (bounds.height - viewPoint.y)
+        let domPoint = CGPoint(x: viewPoint.x / zoom, y: topDownY / zoom)
+
+        let hit = (lastContextHit?.isRecent == true) ? lastContextHit : nil
+        lastContextHit = nil
+
+        let makePayload: (String?) -> ContextMenuActionPayload = { [weak self] browserID in
+            ContextMenuActionPayload(
+                viewPoint: viewPoint,
+                domPoint: domPoint,
+                linkURL: hit?.linkURL,
+                linkDownloadFilename: hit?.linkDownloadFilename ?? "",
+                fallbackImageURLString: hit?.imageURLString ?? "",
+                fallbackMediaURLString: hit?.mediaURLString ?? "",
+                frameInfo: hit?.frameInfo,
+                instanceID: self?.ownerInstanceID,
+                sourceTitle: self?.resolvedSourceTitle ?? "WebBox",
+                browserBundleID: browserID
+            )
         }
 
-        let cleanURL = LinkRouter.unwrapRedirectURL(linkURL)
+        // 1. Image Context Menu (Native WebKit items + Overlay-piercing JS detection)
+        let hasNativeImageItems = menu.items.contains { item in
+            let id = item.identifier?.rawValue ?? ""
+            return id.contains("OpenImageInNewWindow")
+                || id.contains("DownloadImage")
+                || id.contains("CopyImage")
+                || id.contains("CopySubject")
+        }
+        let hasJSImageHit = (hit?.hasImage == true)
 
-        // Remove default broken "Open Link in New Window" if present
-        menu.items.removeAll { item in
-            let idRaw = item.identifier?.rawValue ?? ""
-            return idRaw.contains("OpenLinkInNewWindow") || idRaw.contains("DownloadLinkedFile") && false
+        if hasNativeImageItems {
+            rewireNativeImageMenuItems(in: menu, payloadFactory: makePayload)
+        } else if hasJSImageHit {
+            insertCustomImageMenuGroup(into: menu, at: 0, payloadFactory: makePayload)
         }
 
-        var insertIndex = 0
+        // 2. Rewire WebKit's broken DownloadLinkedFile & Media context menu items
+        for item in menu.items {
+            let id = item.identifier?.rawValue ?? ""
+            if id.contains("DownloadLinkedFile") {
+                item.title = "Tải về tệp được liên kết"
+                item.image = NSImage(systemSymbolName: "arrow.down.doc", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleDownloadLinkedFile(_:))
+                item.representedObject = makePayload(nil)
+                item.isEnabled = true
+            } else if id.contains("DownloadMedia") || id.contains("DownloadVideo") || id.contains("DownloadAudio") {
+                item.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleDownloadMedia(_:))
+                item.representedObject = makePayload(nil)
+                item.isEnabled = true
+            } else if id.contains("OpenMediaInNewWindow") || id.contains("OpenVideoInNewWindow") {
+                item.image = NSImage(systemSymbolName: "play.rectangle.on.rectangle", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleOpenMediaInNewWindow(_:))
+                item.representedObject = makePayload(nil)
+                item.isEnabled = true
+            }
+        }
 
-        let openInAppItem = NSMenuItem(
-            title: "Mở liên kết trong Trình duyệt WebBox",
-            action: #selector(handleOpenLinkInApp(_:)),
-            keyEquivalent: ""
-        )
-        openInAppItem.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: nil)
-        openInAppItem.target = self
-        openInAppItem.representedObject = (cleanURL, instanceID)
-        menu.insertItem(openInAppItem, at: insertIndex)
-        insertIndex += 1
+        // 3. Smart Link Routing Context Menu (<a href="http(s)://...">)
+        if let rawLink = hit?.linkURL,
+           let scheme = rawLink.scheme?.lowercased(),
+           (scheme == "http" || scheme == "https"),
+           let instanceID = ownerInstanceID {
+            let cleanURL = LinkRouter.unwrapRedirectURL(rawLink)
 
-        let defaultBrowserName = LinkRouter.defaultSystemBrowserName()
-        let openExternalItem = NSMenuItem(
-            title: "Mở bằng Trình duyệt ngoài (\(defaultBrowserName))",
-            action: #selector(handleOpenLinkExternalDefault(_:)),
-            keyEquivalent: ""
-        )
-        openExternalItem.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
-        openExternalItem.target = self
-        openExternalItem.representedObject = (cleanURL, instanceID)
-        menu.insertItem(openExternalItem, at: insertIndex)
-        insertIndex += 1
+            menu.items.removeAll { item in
+                let idRaw = item.identifier?.rawValue ?? ""
+                return idRaw.contains("OpenLinkInNewWindow")
+            }
 
-        let browsers = LinkRouter.installedExternalBrowsers()
-        if browsers.count > 1 {
-            let pickSubmenuItem = NSMenuItem(title: "Mở liên kết bằng trình duyệt khác", action: nil, keyEquivalent: "")
-            pickSubmenuItem.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
-            let sub = NSMenu()
-            for browser in browsers {
-                let bItem = NSMenuItem(
-                    title: browser.name,
-                    action: #selector(handleOpenLinkSpecificBrowser(_:)),
+            var insertIndex = 0
+
+            let openInAppItem = NSMenuItem(
+                title: "Mở liên kết trong Trình duyệt WebBox",
+                action: #selector(handleOpenLinkInApp(_:)),
+                keyEquivalent: ""
+            )
+            openInAppItem.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: nil)
+            openInAppItem.target = self
+            openInAppItem.representedObject = (cleanURL, instanceID)
+            menu.insertItem(openInAppItem, at: insertIndex)
+            insertIndex += 1
+
+            let defaultBrowserName = LinkRouter.defaultSystemBrowserName()
+            let openExternalItem = NSMenuItem(
+                title: "Mở bằng Trình duyệt ngoài (\(defaultBrowserName))",
+                action: #selector(handleOpenLinkExternalDefault(_:)),
+                keyEquivalent: ""
+            )
+            openExternalItem.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
+            openExternalItem.target = self
+            openExternalItem.representedObject = (cleanURL, instanceID)
+            menu.insertItem(openExternalItem, at: insertIndex)
+            insertIndex += 1
+
+            let browsers = LinkRouter.installedExternalBrowsers()
+            if browsers.count > 1 {
+                let pickSubmenuItem = NSMenuItem(title: "Mở liên kết bằng trình duyệt khác", action: nil, keyEquivalent: "")
+                pickSubmenuItem.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
+                let sub = NSMenu()
+                for browser in browsers {
+                    let bItem = NSMenuItem(
+                        title: browser.name,
+                        action: #selector(handleOpenLinkSpecificBrowser(_:)),
+                        keyEquivalent: ""
+                    )
+                    bItem.target = self
+                    bItem.representedObject = (cleanURL, browser.bundleIdentifier)
+                    let icon = NSWorkspace.shared.icon(forFile: browser.appURL.path)
+                    icon.size = NSSize(width: 16, height: 16)
+                    bItem.image = icon
+                    sub.addItem(bItem)
+                }
+                pickSubmenuItem.submenu = sub
+                menu.insertItem(pickSubmenuItem, at: insertIndex)
+                insertIndex += 1
+            }
+
+            let copyCleanItem = NSMenuItem(
+                title: "Sao chép liên kết sạch",
+                action: #selector(handleCopyCleanLink(_:)),
+                keyEquivalent: ""
+            )
+            copyCleanItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+            copyCleanItem.target = self
+            copyCleanItem.representedObject = cleanURL
+            menu.insertItem(copyCleanItem, at: insertIndex)
+            insertIndex += 1
+
+            let alreadyHasDownloadLink = menu.items.contains { ($0.identifier?.rawValue ?? "").contains("DownloadLinkedFile") }
+            if !alreadyHasDownloadLink {
+                let dlLinkItem = NSMenuItem(
+                    title: "Tải về tệp được liên kết",
+                    action: #selector(handleDownloadLinkedFile(_:)),
                     keyEquivalent: ""
                 )
-                bItem.target = self
-                bItem.representedObject = (cleanURL, browser.bundleIdentifier)
-                let icon = NSWorkspace.shared.icon(forFile: browser.appURL.path)
-                icon.size = NSSize(width: 16, height: 16)
-                bItem.image = icon
-                sub.addItem(bItem)
+                dlLinkItem.image = NSImage(systemSymbolName: "arrow.down.doc", accessibilityDescription: nil)
+                dlLinkItem.target = self
+                dlLinkItem.representedObject = makePayload(nil)
+                menu.insertItem(dlLinkItem, at: insertIndex)
+                insertIndex += 1
             }
-            pickSubmenuItem.submenu = sub
-            menu.insertItem(pickSubmenuItem, at: insertIndex)
-            insertIndex += 1
+
+            menu.insertItem(.separator(), at: insertIndex)
+        }
+    }
+
+    private func rewireNativeImageMenuItems(
+        in menu: NSMenu,
+        payloadFactory: (String?) -> ContextMenuActionPayload
+    ) {
+        var foundCopySubject = false
+        var foundShare = false
+        var downloadIndex: Int? = nil
+        var copyImageIndex: Int? = nil
+
+        for (idx, item) in menu.items.enumerated() {
+            let id = item.identifier?.rawValue ?? ""
+            if id.contains("OpenImageInNewWindow") {
+                item.title = "Mở hình ảnh trong cửa sổ mới"
+                item.image = NSImage(systemSymbolName: "macwindow.badge.plus", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleOpenImageInNewWindow(_:))
+                item.representedObject = payloadFactory(nil)
+                item.isEnabled = true
+            } else if id.contains("DownloadImage") {
+                item.title = "Tải về hình ảnh"
+                item.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleDownloadImage(_:))
+                item.representedObject = payloadFactory(nil)
+                item.isEnabled = true
+                downloadIndex = idx
+            } else if id.contains("CopyImage") {
+                item.title = "Sao chép hình ảnh"
+                item.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleCopyImage(_:))
+                item.representedObject = payloadFactory(nil)
+                item.isEnabled = true
+                copyImageIndex = idx
+            } else if id.contains("CopySubject") {
+                item.title = "Sao chép chủ thể"
+                item.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleCopySubject(_:))
+                item.representedObject = payloadFactory(nil)
+                item.isEnabled = true
+                foundCopySubject = true
+            } else if id.contains("ShareMenu") {
+                item.submenu = nil
+                item.title = "Chia sẻ..."
+                item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: nil)
+                item.target = self
+                item.action = #selector(handleShareImage(_:))
+                item.representedObject = payloadFactory(nil)
+                item.isEnabled = true
+                foundShare = true
+            }
         }
 
-        let copyCleanItem = NSMenuItem(
-            title: "Sao chép liên kết sạch",
-            action: #selector(handleCopyCleanLink(_:)),
-            keyEquivalent: ""
-        )
-        copyCleanItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-        copyCleanItem.target = self
-        copyCleanItem.representedObject = cleanURL
-        menu.insertItem(copyCleanItem, at: insertIndex)
-        insertIndex += 1
+        // Insert "Sao chép chủ thể" right below "Sao chép hình ảnh" if WebKit omitted it (e.g. on blob:/WebP)
+        if !foundCopySubject, let cIdx = copyImageIndex {
+            let subjectItem = NSMenuItem(
+                title: "Sao chép chủ thể",
+                action: #selector(handleCopySubject(_:)),
+                keyEquivalent: ""
+            )
+            subjectItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+            subjectItem.target = self
+            subjectItem.representedObject = payloadFactory(nil)
+            menu.insertItem(subjectItem, at: min(menu.items.count, cIdx + 1))
+        }
 
-        menu.insertItem(.separator(), at: insertIndex)
-        lastContextLinkURL = nil
+        // Insert "Lưu hình ảnh thành..." right below "Tải về hình ảnh"
+        if let dIdx = downloadIndex {
+            let saveAsItem = NSMenuItem(
+                title: "Lưu hình ảnh thành...",
+                action: #selector(handleSaveImageAs(_:)),
+                keyEquivalent: ""
+            )
+            saveAsItem.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: nil)
+            saveAsItem.target = self
+            saveAsItem.representedObject = payloadFactory(nil)
+            menu.insertItem(saveAsItem, at: min(menu.items.count, dIdx + 1))
+        }
+
+        // Insert "Chia sẻ..." if WebKit omitted it
+        if !foundShare {
+            let shareItem = NSMenuItem(
+                title: "Chia sẻ...",
+                action: #selector(handleShareImage(_:)),
+                keyEquivalent: ""
+            )
+            shareItem.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: nil)
+            shareItem.target = self
+            shareItem.representedObject = payloadFactory(nil)
+            if let inspectIdx = menu.items.firstIndex(where: { ($0.identifier?.rawValue ?? "").contains("InspectElement") }) {
+                let targetIdx = max(0, inspectIdx - (inspectIdx > 0 && menu.items[inspectIdx - 1].isSeparatorItem ? 1 : 0))
+                menu.insertItem(.separator(), at: targetIdx)
+                menu.insertItem(shareItem, at: targetIdx + 1)
+            } else {
+                menu.addItem(.separator())
+                menu.addItem(shareItem)
+            }
+        }
     }
+
+    private func insertCustomImageMenuGroup(
+        into menu: NSMenu,
+        at startIndex: Int,
+        payloadFactory: (String?) -> ContextMenuActionPayload
+    ) {
+        var idx = min(startIndex, menu.items.count)
+
+        let entries: [(String, String, Selector)] = [
+            ("Mở hình ảnh trong cửa sổ mới", "macwindow.badge.plus", #selector(handleOpenImageInNewWindow(_:))),
+            ("Tải về hình ảnh", "arrow.down.circle", #selector(handleDownloadImage(_:))),
+            ("Lưu hình ảnh thành...", "folder.badge.plus", #selector(handleSaveImageAs(_:))),
+            ("Sao chép hình ảnh", "doc.on.doc", #selector(handleCopyImage(_:))),
+            ("Sao chép chủ thể", "sparkles", #selector(handleCopySubject(_:))),
+            ("Chia sẻ...", "square.and.arrow.up", #selector(handleShareImage(_:)))
+        ]
+
+        for (title, symbol, action) in entries {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.target = self
+            item.representedObject = payloadFactory(nil)
+            menu.insertItem(item, at: idx)
+            idx += 1
+        }
+        menu.insertItem(.separator(), at: idx)
+    }
+
+    // MARK: - Image & Media Context Menu Actions
+
+    @objc private func handleOpenImageInNewWindow(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload) else {
+                WorkspaceStore.shared.showToast("Không thể đọc dữ liệu hình ảnh từ trang này")
+                return
+            }
+            WebSessionManager.shared.presentImagePreviewWindow(
+                extracted: extracted,
+                sourceTitle: payload.sourceTitle
+            )
+        }
+    }
+
+    @objc private func handleDownloadImage(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload) else {
+                WorkspaceStore.shared.showToast("Không thể tải về hình ảnh này")
+                return
+            }
+            _ = ContextMediaExtractor.saveDataToDownloads(
+                extracted.rawData,
+                suggestedFilename: extracted.suggestedFilename,
+                sourceTitle: payload.sourceTitle,
+                forceSavePanel: false,
+                parentWindow: self.window
+            )
+        }
+    }
+
+    @objc private func handleSaveImageAs(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload) else {
+                WorkspaceStore.shared.showToast("Không thể lưu hình ảnh này")
+                return
+            }
+            _ = ContextMediaExtractor.saveDataToDownloads(
+                extracted.rawData,
+                suggestedFilename: extracted.suggestedFilename,
+                sourceTitle: payload.sourceTitle,
+                forceSavePanel: true,
+                parentWindow: self.window
+            )
+        }
+    }
+
+    @objc private func handleCopyImage(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload) else {
+                WorkspaceStore.shared.showToast("Không thể sao chép hình ảnh này")
+                return
+            }
+            ContextMediaExtractor.copyImageToPasteboard(extracted.image, preferredPNGData: extracted.pngData)
+            WorkspaceStore.shared.showToast("Đã sao chép hình ảnh vào Clipboard")
+        }
+    }
+
+    @objc private func handleCopySubject(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload) else {
+                WorkspaceStore.shared.showToast("Không thể đọc hình ảnh để tách chủ thể")
+                return
+            }
+            WorkspaceStore.shared.showToast("Đang tách chủ thể bằng AI...")
+            if let lifted = await ContextMediaExtractor.liftForegroundSubject(from: extracted.image) {
+                ContextMediaExtractor.copyImageToPasteboard(lifted.image, preferredPNGData: lifted.pngData)
+                WorkspaceStore.shared.showToast("Đã tách nền & sao chép chủ thể vào Clipboard")
+            } else {
+                ContextMediaExtractor.copyImageToPasteboard(extracted.image, preferredPNGData: extracted.pngData)
+                WorkspaceStore.shared.showToast("Không tìm thấy chủ thể riêng biệt — đã sao chép toàn bộ ảnh")
+            }
+        }
+    }
+
+    @objc private func handleShareImage(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extracted = await ContextMediaExtractor.extractImage(from: self, payload: payload),
+                  let tempFileURL = ContextMediaExtractor.makeTemporaryShareFile(for: extracted) else {
+                WorkspaceStore.shared.showToast("Không thể chuẩn bị hình ảnh để chia sẻ")
+                return
+            }
+            guard self.window != nil else { return }
+            let anchor = NSRect(x: payload.viewPoint.x, y: payload.viewPoint.y, width: 2, height: 2)
+            let picker = NSSharingServicePicker(items: [tempFileURL])
+            self.activeSharingPicker = picker
+            picker.show(relativeTo: anchor, of: self, preferredEdge: .minY)
+        }
+    }
+
+    @objc private func handleDownloadLinkedFile(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let resolved = await ContextMediaExtractor.extractBlobOrMedia(from: self, payload: payload, preferMedia: false)
+            if let blobBytes = resolved.blobData {
+                _ = ContextMediaExtractor.saveDataToDownloads(
+                    blobBytes,
+                    suggestedFilename: resolved.suggestedFilename,
+                    sourceTitle: payload.sourceTitle,
+                    forceSavePanel: false,
+                    parentWindow: self.window
+                )
+            } else if let remoteURL = resolved.remoteURL {
+                let cleanURL = LinkRouter.unwrapRedirectURL(remoteURL)
+                WebSessionManager.shared.startManagedDownload(
+                    request: URLRequest(url: cleanURL),
+                    in: self,
+                    sourceTitle: payload.sourceTitle
+                )
+            } else {
+                WorkspaceStore.shared.showToast("Không tìm thấy tệp liên kết hợp lệ để tải về")
+            }
+        }
+    }
+
+    @objc private func handleDownloadMedia(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let resolved = await ContextMediaExtractor.extractBlobOrMedia(from: self, payload: payload, preferMedia: true)
+            if let blobBytes = resolved.blobData {
+                _ = ContextMediaExtractor.saveDataToDownloads(
+                    blobBytes,
+                    suggestedFilename: resolved.suggestedFilename,
+                    sourceTitle: payload.sourceTitle,
+                    forceSavePanel: false,
+                    parentWindow: self.window
+                )
+            } else if let remoteURL = resolved.remoteURL {
+                WebSessionManager.shared.startManagedDownload(
+                    request: URLRequest(url: remoteURL),
+                    in: self,
+                    sourceTitle: payload.sourceTitle
+                )
+            } else {
+                WorkspaceStore.shared.showToast("Không thể tải trực tiếp luồng phát này")
+            }
+        }
+    }
+
+    @objc private func handleOpenMediaInNewWindow(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? ContextMenuActionPayload else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let resolved = await ContextMediaExtractor.extractBlobOrMedia(from: self, payload: payload, preferMedia: true)
+            if let remoteURL = resolved.remoteURL, let instID = payload.instanceID {
+                WorkspaceStore.shared.openLinkInAppBrowser(remoteURL, for: instID)
+            } else if let blobBytes = resolved.blobData,
+                      let savedURL = ContextMediaExtractor.saveDataToDownloads(
+                          blobBytes,
+                          suggestedFilename: resolved.suggestedFilename,
+                          sourceTitle: payload.sourceTitle,
+                          forceSavePanel: false,
+                          parentWindow: self.window
+                      ) {
+                NSWorkspace.shared.open(savedURL)
+            }
+        }
+    }
+
+    // MARK: - Link Context Menu Actions
 
     @objc private func handleOpenLinkInApp(_ sender: NSMenuItem) {
         guard let (url, instanceID) = sender.representedObject as? (URL, UUID) else { return }
@@ -178,6 +569,14 @@ private final class DeferredPopupCatcher: NSObject, WKNavigationDelegate, WKUIDe
         let abs = url.absoluteString
         if abs == "about:blank" || abs.isEmpty {
             decisionHandler(.allow)
+            return
+        }
+
+        if url.scheme?.lowercased() == "blob" {
+            decisionHandler(.cancel)
+            let title = WorkspaceStore.shared.instance(for: sourceInstanceID)?.displayTitle ?? "WebBox"
+            WebSessionManager.shared.handleBlobPopupNavigation(url, from: webView, sourceTitle: title)
+            onResolved?(id)
             return
         }
 
@@ -259,6 +658,7 @@ final class WebSessionManager: NSObject, ObservableObject {
     private var inAppTabControllers: [UUID: InAppTabWebController] = [:]
     private var detachedWindows: [UUID: DetachedInstanceWindow] = [:]
     private var authWindows: [UUID: AuthPopupWindow] = [:]
+    private var imagePreviewWindows: [UUID: ImagePreviewWindow] = [:]
     private var deferredCatchers: [UUID: DeferredPopupCatcher] = [:]
     private var activeDownloads: [UUID: DownloadTracker] = [:]
 
@@ -553,7 +953,73 @@ final class WebSessionManager: NSObject, ObservableObject {
         return wv
     }
 
-    // MARK: - Download Registration
+    // MARK: - Download Registration & Image Preview Windows
+
+    func presentImagePreviewWindow(extracted: ExtractedContextImage, sourceTitle: String) {
+        let preview = ImagePreviewWindow(extracted: extracted, sourceTitle: sourceTitle) { [weak self] closedID in
+            self?.imagePreviewWindows.removeValue(forKey: closedID)
+        }
+        imagePreviewWindows[preview.id] = preview
+    }
+
+    func startManagedDownload(request: URLRequest, in webView: WKWebView, sourceTitle: String) {
+        webView.startDownload(using: request) { [weak self] download in
+            self?.attachDownload(download, sourceTitle: sourceTitle)
+        }
+    }
+
+    func recordCompletedDirectDownload(
+        filename: String,
+        destinationURL: URL,
+        byteCount: Int64,
+        sourceTitle: String
+    ) {
+        let item = DownloadTaskItem(
+            id: UUID(),
+            sourceInstanceTitle: sourceTitle,
+            filename: filename,
+            destinationURL: destinationURL,
+            bytesReceived: max(1, byteCount),
+            expectedBytes: max(1, byteCount),
+            state: .completed,
+            startedAt: Date()
+        )
+        downloads.insert(item, at: 0)
+        WorkspaceStore.shared.showToast("Đã tải xong: \(filename)", revealFileURL: destinationURL)
+        postDownloadCompletedNotification(filename: filename, fileURL: destinationURL)
+    }
+
+    func handleBlobPopupNavigation(_ blobURL: URL, from webView: WKWebView, sourceTitle: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let extractedBlob = await ContextMediaExtractor.extractDirectBlobURL(blobURL, from: webView) else {
+                WorkspaceStore.shared.showToast("Không thể mở dữ liệu tạm thời từ trang này")
+                return
+            }
+            if extractedBlob.mimeType.hasPrefix("image/"),
+               let nsImg = NSImage(data: extractedBlob.data) {
+                let cg = nsImg.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                let imgPayload = ExtractedContextImage(
+                    image: nsImg,
+                    rawData: extractedBlob.data,
+                    pngData: ContextMediaExtractor.encodePNG(from: nsImg),
+                    fileExtension: (extractedBlob.filename as NSString).pathExtension,
+                    suggestedFilename: extractedBlob.filename,
+                    pixelWidth: cg?.width ?? max(1, Int(nsImg.size.width)),
+                    pixelHeight: cg?.height ?? max(1, Int(nsImg.size.height))
+                )
+                self.presentImagePreviewWindow(extracted: imgPayload, sourceTitle: sourceTitle)
+            } else {
+                _ = ContextMediaExtractor.saveDataToDownloads(
+                    extractedBlob.data,
+                    suggestedFilename: extractedBlob.filename,
+                    sourceTitle: sourceTitle,
+                    forceSavePanel: false,
+                    parentWindow: webView.window
+                )
+            }
+        }
+    }
 
     fileprivate func attachDownload(_ download: WKDownload, sourceTitle: String) {
         let tracker = DownloadTracker(download: download, sourceTitle: sourceTitle, manager: self)
@@ -709,95 +1175,14 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
         }
     }
 
-    // MARK: - Injected JS Bridge (Modifier Clicks, Context Link, Notifications & Custom CSS)
+    // MARK: - Injected JS Bridge (Modifier Clicks, Context Menu Hit-Test, Notifications & Custom CSS)
 
     private static func makeBridgeScript(customCSS: String) -> WKUserScript {
-        let escapedCSS = customCSS
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "`", with: "\\`")
-
-        let source = """
-        (function() {
-            if (window.__webboxBridgeInstalled) return;
-            window.__webboxBridgeInstalled = true;
-
-            function post(payload) {
-                try {
-                    window.webkit.messageHandlers.webboxBridge.postMessage(payload);
-                } catch (_) {}
-            }
-
-            function findAnchor(el) {
-                while (el && el !== document.body) {
-                    if (el.tagName && el.tagName.toLowerCase() === 'a' && el.href) {
-                        return el;
-                    }
-                    el = el.parentElement;
-                }
-                return null;
-            }
-
-            // Capture right-click link URL for native macOS Context Menu
-            document.addEventListener('contextmenu', function(e) {
-                const a = findAnchor(e.target);
-                if (a && /^https?:\\/\\//i.test(a.href)) {
-                    post({ type: 'contextLink', url: a.href });
-                }
-            }, true);
-
-            // Capture Cmd+Click (In-App Browser), Option+Click (External Browser), and Middle-Click
-            document.addEventListener('click', function(e) {
-                const a = findAnchor(e.target);
-                if (!a || !/^https?:\\/\\//i.test(a.href)) return;
-                if (e.altKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    post({ type: 'openLink', url: a.href, override: 'external' });
-                } else if (e.metaKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    post({ type: 'openLink', url: a.href, override: 'inApp' });
-                }
-            }, true);
-
-            document.addEventListener('auxclick', function(e) {
-                if (e.button !== 1) return;
-                const a = findAnchor(e.target);
-                if (a && /^https?:\\/\\//i.test(a.href)) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    post({ type: 'openLink', url: a.href, override: 'inApp' });
-                }
-            }, true);
-
-            // Bridge Web Notification API to macOS UNUserNotificationCenter
-            const NativeNotification = function(title, options) {
-                const opts = options || {};
-                post({
-                    type: 'webNotification',
-                    title: String(title || ''),
-                    body: String(opts.body || '')
-                });
-                this.close = function() {};
-            };
-            NativeNotification.permission = 'granted';
-            NativeNotification.requestPermission = function(cb) {
-                if (typeof cb === 'function') cb('granted');
-                return Promise.resolve('granted');
-            };
-            window.Notification = NativeNotification;
-
-            // Inject optional custom CSS
-            const cssText = `\(escapedCSS)`;
-            if (cssText.trim().length > 0) {
-                document.addEventListener('DOMContentLoaded', function() {
-                    const style = document.createElement('style');
-                    style.textContent = cssText;
-                    document.head.appendChild(style);
-                });
-            }
-        })();
-        """
+        let source = ContextMediaExtractor.makeBridgeScriptSource(
+            includeLinkClickInterception: true,
+            includeNotificationsBridge: true,
+            customCSS: customCSS
+        )
         return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
     }
 
@@ -806,10 +1191,19 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
               let type = body["type"] as? String else { return }
 
         switch type {
-        case "contextLink":
-            if let urlStr = body["url"] as? String, let url = URL(string: urlStr) {
-                webView.lastContextLinkURL = url
-            }
+        case "contextMenuHit":
+            let linkStr = (body["linkURL"] as? String) ?? ""
+            let linkURL = linkStr.isEmpty ? nil : URL(string: linkStr)
+            webView.lastContextHit = ContextMenuHitSnapshot(
+                timestamp: CFAbsoluteTimeGetCurrent(),
+                linkURL: linkURL,
+                linkDownloadFilename: (body["linkDownload"] as? String) ?? "",
+                hasImage: (body["hasImage"] as? Bool) ?? false,
+                imageURLString: (body["imageURL"] as? String) ?? "",
+                imageAlt: (body["imageAlt"] as? String) ?? "",
+                mediaURLString: (body["mediaURL"] as? String) ?? "",
+                frameInfo: message.frameInfo
+            )
         case "openLink":
             guard let urlStr = body["url"] as? String, let url = URL(string: urlStr) else { return }
             let overrideStr = body["override"] as? String
@@ -946,6 +1340,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
                 )
             }
 
+            if url.scheme?.lowercased() == "blob" {
+                manager?.handleBlobPopupNavigation(url, from: webView, sourceTitle: instance.displayTitle)
+                return nil
+            }
+
             if LinkRouter.isAuthenticationFlowURL(url) {
                 return manager?.createAuthPopupWebView(
                     configuration: configuration,
@@ -1056,11 +1455,13 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
 // MARK: - In-App Browser Tab Controller
 
 @MainActor
-private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUIDelegate {
+private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     let tab: InAppBrowserTab
     weak var manager: WebSessionManager?
     let webView: WebBoxWKWebView
     private var observations: [NSKeyValueObservation] = []
+
+    private static let bridgeHandlerName = "webboxBridge"
 
     init(tab: InAppBrowserTab, manager: WebSessionManager) {
         self.tab = tab
@@ -1074,9 +1475,16 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         }
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        if WorkspaceStore.shared.preferences.enableDeveloperExtras {
+            config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        }
+
+        let userContent = WKUserContentController()
+        config.userContentController = userContent
 
         let wv = WebBoxWKWebView(frame: .zero, configuration: config)
         wv.ownerInstanceID = tab.ownerInstanceID
+        wv.sourceTitleOverride = "Trình duyệt WebBox"
         wv.customUserAgent = UserAgentPreset.safariMac.resolvedUserAgent(customValue: "")
         wv.allowsBackForwardNavigationGestures = true
         wv.allowsMagnification = true
@@ -1086,6 +1494,15 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         self.webView = wv
 
         super.init()
+
+        userContent.add(WeakScriptMessageBridge(target: self), name: Self.bridgeHandlerName)
+        let bridgeSource = ContextMediaExtractor.makeBridgeScriptSource(
+            includeLinkClickInterception: false,
+            includeNotificationsBridge: false,
+            customCSS: ""
+        )
+        userContent.addUserScript(WKUserScript(source: bridgeSource, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+
         wv.navigationDelegate = self
         wv.uiDelegate = self
         installObservers()
@@ -1098,9 +1515,26 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
     func teardown() {
         observations.removeAll()
         webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.bridgeHandlerName)
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.removeFromSuperview()
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              (body["type"] as? String) == "contextMenuHit" else { return }
+        let linkStr = (body["linkURL"] as? String) ?? ""
+        webView.lastContextHit = ContextMenuHitSnapshot(
+            timestamp: CFAbsoluteTimeGetCurrent(),
+            linkURL: linkStr.isEmpty ? nil : URL(string: linkStr),
+            linkDownloadFilename: (body["linkDownload"] as? String) ?? "",
+            hasImage: (body["hasImage"] as? Bool) ?? false,
+            imageURLString: (body["imageURL"] as? String) ?? "",
+            imageAlt: (body["imageAlt"] as? String) ?? "",
+            mediaURLString: (body["mediaURL"] as? String) ?? "",
+            frameInfo: message.frameInfo
+        )
     }
 
     private func installObservers() {
@@ -1177,11 +1611,17 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if let url = navigationAction.request.url {
+            if url.scheme?.lowercased() == "blob" {
+                manager?.handleBlobPopupNavigation(url, from: webView, sourceTitle: "Trình duyệt WebBox")
+                return nil
+            }
+
             if LinkRouter.isAuthenticationFlowURL(url) {
                 return manager?.createAuthPopupWebView(configuration: configuration, title: url.host ?? "Đăng nhập")
             }
-            // Open new-tab links inside In-App Browser as another In-App Tab!
-            WorkspaceStore.shared.openLinkInAppBrowser(LinkRouter.unwrapRedirectURL(url), for: tab.ownerInstanceID)
+            if let scheme = url.scheme?.lowercased(), (scheme == "http" || scheme == "https") {
+                WorkspaceStore.shared.openLinkInAppBrowser(LinkRouter.unwrapRedirectURL(url), for: tab.ownerInstanceID)
+            }
         }
         return nil
     }

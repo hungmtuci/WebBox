@@ -67,7 +67,7 @@ final class UpdateCheckerService: ObservableObject {
     }
 
     var currentVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.3"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.4"
     }
 
     var availableUpdateInfo: ReleaseUpdateInfo? {
