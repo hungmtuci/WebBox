@@ -25,7 +25,13 @@ final class WorkspaceStore: ObservableObject {
     // Active navigation state
     @Published var selectedSpaceID: UUID? = nil // nil = Tất cả
     @Published var activeInstanceID: UUID? = nil
-    @Published var secondarySplitInstanceID: UUID? = nil
+    @Published var secondarySplitInstanceID: UUID? = nil {
+        didSet {
+            if let id = secondarySplitInstanceID {
+                WebSessionManager.shared.markInstanceActive(id)
+            }
+        }
+    }
 
     // Smart Link Routing & In-App Browser state
     @Published var pendingLinkPrompt: PendingLinkPrompt? = nil
@@ -55,9 +61,12 @@ final class WorkspaceStore: ObservableObject {
 
     private let appSupportDir: URL
     private let stateFileURL: URL
+    private let persistenceQueue = DispatchQueue(label: "com.hunglx.WebBox.persistence", qos: .utility)
+    private var saveDebounceTask: Task<Void, Never>?
+    private var hasPendingSave = false
     private var toastClearTask: Task<Void, Never>?
 
-    private struct PersistedHubState: Codable {
+    private struct PersistedHubState: Codable, Sendable {
         var spaces: [SpaceItem]
         var profiles: [SessionProfileInfo]
         var instances: [WebAppInstance]
@@ -171,13 +180,40 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func save() {
+        hasPendingSave = true
+        saveDebounceTask?.cancel()
+        saveDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.enqueuePersistenceWrite(synchronously: false)
+        }
+    }
+
+    /// Flushes any pending debounced state change immediately before application termination.
+    func flushPendingSaveSynchronously() {
+        saveDebounceTask?.cancel()
+        saveDebounceTask = nil
+        guard hasPendingSave else { return }
+        enqueuePersistenceWrite(synchronously: true)
+    }
+
+    private func enqueuePersistenceWrite(synchronously: Bool) {
+        hasPendingSave = false
+
         if isStandaloneMode {
-            guard let first = instances.first else { return }
+            guard let snapshot = instances.first else { return }
             let overrideDir = appSupportDir.appendingPathComponent("StandaloneOverrides", isDirectory: true)
-            try? FileManager.default.createDirectory(at: overrideDir, withIntermediateDirectories: true)
-            let overrideFile = overrideDir.appendingPathComponent("\(first.id.uuidString).json")
-            if let data = try? JSONEncoder().encode(first) {
-                try? data.write(to: overrideFile, options: .atomic)
+            let overrideFile = overrideDir.appendingPathComponent("\(snapshot.id.uuidString).json")
+            let writeBlock: @Sendable () -> Void = {
+                try? FileManager.default.createDirectory(at: overrideDir, withIntermediateDirectories: true)
+                if let data = try? JSONEncoder().encode(snapshot) {
+                    try? data.write(to: overrideFile, options: .atomic)
+                }
+            }
+            if synchronously {
+                persistenceQueue.sync(execute: writeBlock)
+            } else {
+                persistenceQueue.async(execute: writeBlock)
             }
             return
         }
@@ -190,10 +226,18 @@ final class WorkspaceStore: ObservableObject {
             selectedSpaceID: selectedSpaceID,
             activeInstanceID: activeInstanceID
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted]
-        if let data = try? encoder.encode(payload) {
-            try? data.write(to: stateFileURL, options: .atomic)
+        let targetURL = stateFileURL
+        let writeBlock: @Sendable () -> Void = {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            if let data = try? encoder.encode(payload) {
+                try? data.write(to: targetURL, options: .atomic)
+            }
+        }
+        if synchronously {
+            persistenceQueue.sync(execute: writeBlock)
+        } else {
+            persistenceQueue.async(execute: writeBlock)
         }
     }
 
@@ -249,15 +293,20 @@ final class WorkspaceStore: ObservableObject {
     // MARK: - Multi-Account & Instance Management
 
     func selectInstance(_ id: UUID) {
-        activeInstanceID = id
+        WebSessionManager.shared.markInstanceActive(id)
+        if activeInstanceID != id {
+            activeInstanceID = id
+        }
         if secondarySplitInstanceID == id {
             secondarySplitInstanceID = nil
         }
         // Sync In-App Browser visibility to whether this instance has open in-app tabs
         let tabsForInstance = inAppTabs.filter { $0.ownerInstanceID == id }
         if let lastTab = tabsForInstance.last {
-            activeInAppTabID = lastTab.id
-        } else {
+            if activeInAppTabID != lastTab.id {
+                activeInAppTabID = lastTab.id
+            }
+        } else if isInAppBrowserVisible {
             isInAppBrowserVisible = false
         }
         save()
@@ -615,19 +664,26 @@ final class WorkspaceStore: ObservableObject {
         canGoForward: Bool?
     ) {
         guard let idx = inAppTabs.firstIndex(where: { $0.id == tabID }) else { return }
+        var updated = inAppTabs[idx]
         if let url {
-            inAppTabs[idx].currentURL = url
-            if activeInAppTab?.id == tabID {
+            updated.currentURL = url
+            if activeInAppTab?.id == tabID, inAppAddressBarText != url.absoluteString {
                 inAppAddressBarText = url.absoluteString
             }
         }
-        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            inAppTabs[idx].title = title
+        if let title {
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                updated.title = trimmed
+            }
         }
-        if let isLoading { inAppTabs[idx].isLoading = isLoading }
-        if let progress { inAppTabs[idx].estimatedProgress = progress }
-        if let canGoBack { inAppTabs[idx].canGoBack = canGoBack }
-        if let canGoForward { inAppTabs[idx].canGoForward = canGoForward }
+        if let isLoading { updated.isLoading = isLoading }
+        if let progress { updated.estimatedProgress = progress }
+        if let canGoBack { updated.canGoBack = canGoBack }
+        if let canGoForward { updated.canGoForward = canGoForward }
+
+        guard updated != inAppTabs[idx] else { return }
+        inAppTabs[idx] = updated
     }
 
     // MARK: - Dedicated .app Export Helper

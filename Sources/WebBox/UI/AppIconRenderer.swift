@@ -187,11 +187,22 @@ enum AppIconRenderer {
             (1024, "icon_512x512@2x.png")
         ]
 
+        var renderedPNGBySize: [Int: Data] = [:]
         for (px, filename) in iconSpecs {
-            let img = renderAppIconImage(for: instance, pixelSize: px, includeAccountBadge: true)
-            if let tiff = img.tiffRepresentation,
-               let rep = NSBitmapImageRep(data: tiff),
-               let pngData = rep.representation(using: .png, properties: [:]) {
+            let pngData: Data?
+            if let cached = renderedPNGBySize[px] {
+                pngData = cached
+            } else {
+                let img = renderAppIconImage(for: instance, pixelSize: px, includeAccountBadge: true)
+                let encoded = img.tiffRepresentation
+                    .flatMap { NSBitmapImageRep(data: $0) }
+                    .flatMap { $0.representation(using: .png, properties: [:]) }
+                if let encoded {
+                    renderedPNGBySize[px] = encoded
+                }
+                pngData = encoded
+            }
+            if let pngData {
                 try pngData.write(to: tempDir.appendingPathComponent(filename))
             }
         }
@@ -204,8 +215,24 @@ enum AppIconRenderer {
     }
 }
 
+private final class DecodedAvatarBox: NSObject {
+    let image: NSImage
+    let isHighRes: Bool
+
+    init(image: NSImage, isHighRes: Bool) {
+        self.image = image
+        self.isHighRes = isHighRes
+    }
+}
+
 /// SwiftUI view for displaying an instance's icon with authentic macOS Sonoma/Sequoia squircle styling.
 struct AppInstanceAvatarView: View {
+    private static let decodedCache: NSCache<NSString, DecodedAvatarBox> = {
+        let cache = NSCache<NSString, DecodedAvatarBox>()
+        cache.countLimit = 128
+        return cache
+    }()
+
     let instance: WebAppInstance
     var size: CGFloat = 32
     var showBadgePill: Bool = true
@@ -221,26 +248,39 @@ struct AppInstanceAvatarView: View {
         return nil
     }
 
+    private var resolvedAvatar: DecodedAvatarBox? {
+        guard let data = effectiveIconData, !data.isEmpty else { return nil }
+        let head = data.prefix(16).hashValue
+        let tail = data.suffix(16).hashValue
+        let key = "\(data.count)_\(head)_\(tail)" as NSString
+        if let cached = Self.decodedCache.object(forKey: key) {
+            return cached
+        }
+        guard let nsImage = NSImage(data: data) else { return nil }
+        let box = DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
+        Self.decodedCache.setObject(box, forKey: key)
+        return box
+    }
+
     var body: some View {
         let corner = size * 0.225
 
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if let data = effectiveIconData, let nsImage = NSImage(data: data) {
-                    let isHighRes = Self.maxPixelDimension(of: nsImage) >= 96
+                if let avatar = resolvedAvatar {
                     ZStack {
                         RoundedRectangle(cornerRadius: corner, style: .continuous)
                             .fill(Color.white)
 
-                        if isHighRes {
-                            Image(nsImage: nsImage)
+                        if avatar.isHighRes {
+                            Image(nsImage: avatar.image)
                                 .resizable()
                                 .interpolation(.high)
                                 .scaledToFill()
                                 .frame(width: size, height: size)
                                 .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
                         } else {
-                            Image(nsImage: nsImage)
+                            Image(nsImage: avatar.image)
                                 .resizable()
                                 .interpolation(.high)
                                 .scaledToFit()

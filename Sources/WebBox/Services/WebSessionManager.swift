@@ -151,9 +151,7 @@ final class WebBoxWKWebView: WKWebView {
                     )
                     bItem.target = self
                     bItem.representedObject = (cleanURL, browser.bundleIdentifier)
-                    let icon = NSWorkspace.shared.icon(forFile: browser.appURL.path)
-                    icon.size = NSSize(width: 16, height: 16)
-                    bItem.image = icon
+                    bItem.image = LinkRouter.cachedIcon(for: browser, size: 16)
                     sub.addItem(bItem)
                 }
                 pickSubmenuItem.submenu = sub
@@ -527,7 +525,7 @@ final class WebBoxWKWebView: WKWebView {
 
 // MARK: - Runtime State Snapshot Per Instance
 
-struct InstanceRuntimeState {
+struct InstanceRuntimeState: Equatable {
     var currentURL: URL?
     var pageTitle: String = ""
     var isLoading: Bool = false
@@ -548,6 +546,8 @@ private final class DeferredPopupCatcher: NSObject, WKNavigationDelegate, WKUIDe
     let sourceInstanceID: UUID
     let webView: WKWebView
     var onResolved: ((UUID) -> Void)?
+    private var timeoutTask: Task<Void, Never>?
+    private var isResolved = false
 
     init(sourceInstanceID: UUID, configuration: WKWebViewConfiguration) {
         self.sourceInstanceID = sourceInstanceID
@@ -555,6 +555,27 @@ private final class DeferredPopupCatcher: NSObject, WKNavigationDelegate, WKUIDe
         super.init()
         self.webView.navigationDelegate = self
         self.webView.uiDelegate = self
+
+        // Auto-expire abandoned `window.open('', '_blank')` popups after 15s so WKWebViews never leak in RAM
+        let catcherID = self.id
+        self.timeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard !Task.isCancelled, let self, !self.isResolved else { return }
+            self.finish(promotedToAuthWindow: false, catcherID: catcherID)
+        }
+    }
+
+    private func finish(promotedToAuthWindow: Bool, catcherID: UUID) {
+        guard !isResolved else { return }
+        isResolved = true
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        if !promotedToAuthWindow {
+            webView.stopLoading()
+            webView.navigationDelegate = nil
+            webView.uiDelegate = nil
+        }
+        onResolved?(catcherID)
     }
 
     func webView(
@@ -576,7 +597,7 @@ private final class DeferredPopupCatcher: NSObject, WKNavigationDelegate, WKUIDe
             decisionHandler(.cancel)
             let title = WorkspaceStore.shared.instance(for: sourceInstanceID)?.displayTitle ?? "WebBox"
             WebSessionManager.shared.handleBlobPopupNavigation(url, from: webView, sourceTitle: title)
-            onResolved?(id)
+            finish(promotedToAuthWindow: false, catcherID: id)
             return
         }
 
@@ -584,17 +605,17 @@ private final class DeferredPopupCatcher: NSObject, WKNavigationDelegate, WKUIDe
             // Promote this exact webView into a visible OAuth window so window.opener stays intact!
             decisionHandler(.allow)
             WebSessionManager.shared.promoteWebViewToAuthWindow(webView, title: url.host ?? "Đăng nhập")
-            onResolved?(id)
+            finish(promotedToAuthWindow: true, catcherID: id)
             return
         }
 
         decisionHandler(.cancel)
         WorkspaceStore.shared.handleClickedLink(url, from: sourceInstanceID)
-        onResolved?(id)
+        finish(promotedToAuthWindow: false, catcherID: id)
     }
 
     func webViewDidClose(_ webView: WKWebView) {
-        onResolved?(id)
+        finish(promotedToAuthWindow: false, catcherID: id)
     }
 }
 
@@ -635,6 +656,10 @@ private final class AuthPopupWindow: NSObject, NSWindowDelegate, WKUIDelegate, W
     }
 
     func windowWillClose(_ notification: Notification) {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.removeFromSuperview()
         onClosed?(id)
     }
 
@@ -661,10 +686,14 @@ final class WebSessionManager: NSObject, ObservableObject {
     private var imagePreviewWindows: [UUID: ImagePreviewWindow] = [:]
     private var deferredCatchers: [UUID: DeferredPopupCatcher] = [:]
     private var activeDownloads: [UUID: DownloadTracker] = [:]
+    private var lastActiveTimestamps: [UUID: CFAbsoluteTime] = [:]
+    private var autoHibernateTimer: Timer?
+    private var lastAppliedDockBadge: String? = "__uninitialized__"
 
     private override init() {
         super.init()
         requestNotificationAuthorizationIfNeeded()
+        startAutoHibernateMonitor()
     }
 
     // MARK: - Notification Authorization & Delivery
@@ -712,13 +741,17 @@ final class WebSessionManager: NSObject, ObservableObject {
     func refreshDockBadge() {
         let totalUnread = runtimeStates.values.reduce(0) { $0 + $1.unreadCount }
         let anyDot = runtimeStates.values.contains { $0.hasUnreadDot }
+        let nextBadge: String?
         if totalUnread > 0 {
-            NSApp.dockTile.badgeLabel = totalUnread > 99 ? "99+" : "\(totalUnread)"
+            nextBadge = totalUnread > 99 ? "99+" : "\(totalUnread)"
         } else if anyDot {
-            NSApp.dockTile.badgeLabel = "•"
+            nextBadge = "•"
         } else {
-            NSApp.dockTile.badgeLabel = nil
+            nextBadge = nil
         }
+        guard nextBadge != lastAppliedDockBadge else { return }
+        lastAppliedDockBadge = nextBadge
+        NSApp.dockTile.badgeLabel = nextBadge
     }
 
     // MARK: - Instance WebView Access & Lifecycle
@@ -727,7 +760,80 @@ final class WebSessionManager: NSObject, ObservableObject {
         runtimeStates[instanceID] ?? InstanceRuntimeState()
     }
 
+    func markInstanceActive(_ instanceID: UUID) {
+        lastActiveTimestamps[instanceID] = CFAbsoluteTimeGetCurrent()
+    }
+
+    func isImagePreviewWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return imagePreviewWindows.values.contains { $0.window === window }
+    }
+
+    func instanceID(forDetachedWindow window: NSWindow?) -> UUID? {
+        guard let window else { return nil }
+        return detachedWindows.values.first { $0.window === window }?.instanceID
+    }
+
+    func syncDeveloperExtrasPreference(_ enabled: Bool) {
+        for ctrl in instanceControllers.values {
+            ctrl.webView.configuration.preferences.setValue(enabled, forKey: "developerExtrasEnabled")
+            if #available(macOS 13.3, *) {
+                ctrl.webView.isInspectable = enabled
+            }
+        }
+        for ctrl in inAppTabControllers.values {
+            ctrl.webView.configuration.preferences.setValue(enabled, forKey: "developerExtrasEnabled")
+            if #available(macOS 13.3, *) {
+                ctrl.webView.isInspectable = enabled
+            }
+        }
+    }
+
+    private func startAutoHibernateMonitor() {
+        autoHibernateTimer?.invalidate()
+        autoHibernateTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.checkIdleInstancesForAutoHibernation()
+            }
+        }
+        autoHibernateTimer?.tolerance = 10.0
+    }
+
+    private func checkIdleInstancesForAutoHibernation() {
+        let store = WorkspaceStore.shared
+        let minutes = store.preferences.autoHibernateMinutes
+        guard minutes > 0, !store.isStandaloneMode else { return }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        let thresholdSeconds = Double(minutes) * 60.0
+
+        for id in Array(instanceControllers.keys) {
+            if id == store.activeInstanceID || id == store.secondarySplitInstanceID {
+                lastActiveTimestamps[id] = now
+                continue
+            }
+            if detachedWindows[id] != nil {
+                lastActiveTimestamps[id] = now
+                continue
+            }
+            if store.inAppTabs.contains(where: { $0.ownerInstanceID == id }) {
+                continue
+            }
+            guard let inst = store.instance(for: id), !inst.keepAwakeInBackground else {
+                continue
+            }
+            guard let lastActive = lastActiveTimestamps[id] else {
+                lastActiveTimestamps[id] = now
+                continue
+            }
+            if (now - lastActive) >= thresholdSeconds {
+                hibernateInstance(id, silent: true)
+            }
+        }
+    }
+
     func webView(for instance: WebAppInstance) -> WebBoxWKWebView {
+        lastActiveTimestamps[instance.id] = CFAbsoluteTimeGetCurrent()
         if let existing = instanceControllers[instance.id] {
             if runtimeStates[instance.id]?.isHibernated == true {
                 runtimeStates[instance.id]?.isHibernated = false
@@ -795,20 +901,25 @@ final class WebSessionManager: NSObject, ObservableObject {
     }
 
     /// Unloads the WKWebView from RAM while keeping 100% of cookies/IndexedDB on disk!
-    func hibernateInstance(_ instanceID: UUID) {
+    func hibernateInstance(_ instanceID: UUID, silent: Bool = false) {
         guard detachedWindows[instanceID] == nil else {
-            WorkspaceStore.shared.showToast("Hãy đóng cửa sổ tách rời trước khi ngủ đông tài khoản.")
+            if !silent {
+                WorkspaceStore.shared.showToast("Hãy đóng cửa sổ tách rời trước khi ngủ đông tài khoản.")
+            }
             return
         }
         if let ctrl = instanceControllers.removeValue(forKey: instanceID) {
             ctrl.teardown()
         }
+        lastActiveTimestamps.removeValue(forKey: instanceID)
         var st = runtimeStates[instanceID] ?? InstanceRuntimeState()
         st.isHibernated = true
         st.isLoading = false
         runtimeStates[instanceID] = st
         refreshDockBadge()
-        WorkspaceStore.shared.showToast("Đã chuyển tài khoản sang chế độ Ngủ đông (Giải phóng RAM)")
+        if !silent {
+            WorkspaceStore.shared.showToast("Đã chuyển tài khoản sang chế độ Ngủ đông (Giải phóng RAM)")
+        }
     }
 
     func wakeInstance(_ instance: WebAppInstance) {
@@ -850,6 +961,7 @@ final class WebSessionManager: NSObject, ObservableObject {
         if let ctrl = instanceControllers.removeValue(forKey: instanceID) {
             ctrl.teardown()
         }
+        lastActiveTimestamps.removeValue(forKey: instanceID)
         runtimeStates.removeValue(forKey: instanceID)
         refreshDockBadge()
 
@@ -985,6 +1097,9 @@ final class WebSessionManager: NSObject, ObservableObject {
             startedAt: Date()
         )
         downloads.insert(item, at: 0)
+        if downloads.count > 100 {
+            downloads.removeLast(downloads.count - 100)
+        }
         WorkspaceStore.shared.showToast("Đã tải xong: \(filename)", revealFileURL: destinationURL)
         postDownloadCompletedNotification(filename: filename, fileURL: destinationURL)
     }
@@ -1032,6 +1147,9 @@ final class WebSessionManager: NSObject, ObservableObject {
             downloads[idx] = item
         } else {
             downloads.insert(item, at: 0)
+            if downloads.count > 100 {
+                downloads.removeLast(downloads.count - 100)
+            }
         }
         if finished {
             activeDownloads.removeValue(forKey: item.id)
@@ -1044,10 +1162,14 @@ final class WebSessionManager: NSObject, ObservableObject {
     }
 
     fileprivate func updateRuntimeState(for id: UUID, mutate: (inout InstanceRuntimeState) -> Void) {
-        var current = runtimeStates[id] ?? InstanceRuntimeState()
+        let previous = runtimeStates[id]
+        var current = previous ?? InstanceRuntimeState()
         mutate(&current)
+        guard previous != current else { return }
         runtimeStates[id] = current
-        refreshDockBadge()
+        if previous?.unreadCount != current.unreadCount || previous?.hasUnreadDot != current.hasUnreadDot {
+            refreshDockBadge()
+        }
     }
 }
 
@@ -1059,8 +1181,10 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
     weak var manager: WebSessionManager?
     let webView: WebBoxWKWebView
     private var observations: [NSKeyValueObservation] = []
+    private var lastReportedProgress: Double = -1
 
     private static let bridgeHandlerName = "webboxBridge"
+    private static let unreadTitleRegex = try? NSRegularExpression(pattern: #"^\s*[\(\[](\d+)\+?[\)\]]"#)
 
     init(instance: WebAppInstance, manager: WebSessionManager) {
         self.instance = instance
@@ -1126,8 +1250,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    let p = wv.estimatedProgress
+                    guard abs(p - self.lastReportedProgress) >= 0.03 || p <= 0.01 || p >= 0.99 else { return }
+                    self.lastReportedProgress = p
                     self.manager?.updateRuntimeState(for: self.instance.id) {
-                        $0.estimatedProgress = wv.estimatedProgress
+                        $0.estimatedProgress = p
                     }
                 }
             }
@@ -1158,10 +1285,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
     private func applyParsedUnreadBadge(from title: String) {
         // Matches "(3) Zalo", "[12] Messenger", "(99+) Facebook"
         var count = 0
-        if let range = title.range(of: #"^\s*[\(\[](\d+)\+?[\)\]]"#, options: .regularExpression) {
-            let sub = String(title[range])
-            let digits = sub.filter(\.isNumber)
-            count = Int(digits) ?? 0
+        if let regex = Self.unreadTitleRegex,
+           let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..<title.endIndex, in: title)),
+           match.numberOfRanges > 1,
+           let digitRange = Range(match.range(at: 1), in: title) {
+            count = Int(title[digitRange]) ?? 0
         }
         let hasDot = count == 0 && (title.hasPrefix("•") || title.hasPrefix("●") || title.contains("tin nhắn mới"))
         manager?.updateRuntimeState(for: instance.id) {
@@ -1460,6 +1588,7 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
     weak var manager: WebSessionManager?
     let webView: WebBoxWKWebView
     private var observations: [NSKeyValueObservation] = []
+    private var lastReportedProgress: Double = -1
 
     private static let bridgeHandlerName = "webboxBridge"
 
@@ -1590,12 +1719,15 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    let p = wv.estimatedProgress
+                    guard abs(p - self.lastReportedProgress) >= 0.03 || p <= 0.01 || p >= 0.99 else { return }
+                    self.lastReportedProgress = p
                     WorkspaceStore.shared.updateInAppTabState(
                         tabID: self.tab.id,
                         url: nil,
                         title: nil,
                         isLoading: wv.isLoading,
-                        progress: wv.estimatedProgress,
+                        progress: p,
                         canGoBack: nil,
                         canGoForward: nil
                     )
@@ -1718,6 +1850,22 @@ private final class DetachedInstanceWindow: NSObject, NSWindowDelegate {
 
 // MARK: - WKDownloadDelegate Tracker
 
+private final class ProgressThrottleGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastEmitTime: CFAbsoluteTime = 0
+
+    func shouldEmit(completed: Int64, total: Int64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = CFAbsoluteTimeGetCurrent()
+        if (now - lastEmitTime) >= 0.08 || (total > 0 && completed >= total) {
+            lastEmitTime = now
+            return true
+        }
+        return false
+    }
+}
+
 @MainActor
 private final class DownloadTracker: NSObject, WKDownloadDelegate {
     let id = UUID()
@@ -1725,6 +1873,8 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
     weak var manager: WebSessionManager?
     private var filename: String = "Tep_tai_xuong"
     private var destinationURL: URL?
+    private var lastKnownExpectedBytes: Int64 = 0
+    private var lastKnownReceivedBytes: Int64 = 0
     private let startedAt = Date()
     private var progressObservation: NSKeyValueObservation?
 
@@ -1733,11 +1883,17 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
         self.manager = manager
         super.init()
 
+        let gate = ProgressThrottleGate()
         progressObservation = download.progress.observe(\.completedUnitCount, options: [.new]) { [weak self] prog, _ in
             let completed = prog.completedUnitCount
             let total = prog.totalUnitCount
+            guard gate.shouldEmit(completed: completed, total: total) else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.lastKnownReceivedBytes = completed
+                if total > 0 {
+                    self.lastKnownExpectedBytes = total
+                }
                 self.manager?.upsertDownloadItem(
                     DownloadTaskItem(
                         id: self.id,
@@ -1762,6 +1918,7 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
     ) {
         let store = WorkspaceStore.shared
         let downloadsDir = store.resolvedDownloadsDirectoryURL()
+        self.lastKnownExpectedBytes = response.expectedContentLength
 
         if store.preferences.askWhereToSaveEachDownload {
             let panel = NSSavePanel()
@@ -1794,7 +1951,7 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
             return
         }
 
-        let safeDestination = Self.uniqueFileURL(in: downloadsDir, suggestedName: suggestedFilename)
+        let safeDestination = ContextMediaExtractor.uniqueFileURL(in: downloadsDir, suggestedName: suggestedFilename)
         self.filename = safeDestination.lastPathComponent
         self.destinationURL = safeDestination
 
@@ -1815,14 +1972,22 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         progressObservation = nil
+        let diskBytes: Int64 = {
+            if let path = destinationURL?.path,
+               let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int64,
+               size > 0 {
+                return size
+            }
+            return max(1, max(lastKnownReceivedBytes, lastKnownExpectedBytes))
+        }()
         manager?.upsertDownloadItem(
             DownloadTaskItem(
                 id: id,
                 sourceInstanceTitle: sourceTitle,
                 filename: filename,
                 destinationURL: destinationURL,
-                bytesReceived: 1,
-                expectedBytes: 1,
+                bytesReceived: diskBytes,
+                expectedBytes: diskBytes,
                 state: .completed,
                 startedAt: startedAt
             ),
@@ -1842,29 +2007,12 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
                 sourceInstanceTitle: sourceTitle,
                 filename: filename,
                 destinationURL: destinationURL,
-                bytesReceived: 0,
-                expectedBytes: 0,
+                bytesReceived: lastKnownReceivedBytes,
+                expectedBytes: lastKnownExpectedBytes,
                 state: .failed(error.localizedDescription),
                 startedAt: startedAt
             ),
             finished: true
         )
-    }
-
-    private static func uniqueFileURL(in directory: URL, suggestedName: String) -> URL {
-        let baseURL = directory.appendingPathComponent(suggestedName)
-        if !FileManager.default.fileExists(atPath: baseURL.path) {
-            return baseURL
-        }
-        let ext = baseURL.pathExtension
-        let stem = baseURL.deletingPathExtension().lastPathComponent
-        for idx in 1...999 {
-            let candidateName = ext.isEmpty ? "\(stem) (\(idx))" : "\(stem) (\(idx)).\(ext)"
-            let candidateURL = directory.appendingPathComponent(candidateName)
-            if !FileManager.default.fileExists(atPath: candidateURL.path) {
-                return candidateURL
-            }
-        }
-        return directory.appendingPathComponent("\(UUID().uuidString)_\(suggestedName)")
     }
 }

@@ -23,7 +23,7 @@
 - Sử dụng `WKWebsiteDataStore(forIdentifier:)` nguyên bản trên macOS 14+ giúp mỗi tài khoản có kho **Cookie, LocalStorage, IndexedDB, ServiceWorker** hoàn toàn cô lập.
 - **Nhân bản 1 chạm (`+ Thêm nick Zalo / Facebook` hoặc `⌘⇧N`)**: Tạo ngay tài khoản thứ 2, thứ 3... không bao giờ bị đá phiên đăng nhập.
 - Hỗ trợ **dùng chung phiên (Shared Profile)** khi cần (ví dụ: dùng chung 1 phiên đăng nhập giữa *Facebook* và *Messenger*).
-- Hỗ trợ **Chia đôi màn hình 2 tài khoản song song**, **Tách ra cửa sổ riêng (Dedicated Window)** sang màn hình phụ, và **Ngủ đông (Hibernate)** để giải phóng 100% RAM khi chưa dùng tới.
+- Hỗ trợ **Chia đôi màn hình 2 tài khoản song song**, **Tách ra cửa sổ riêng (Dedicated Window)** sang màn hình phụ, và **Ngủ đông thủ công / Tự động ngủ đông nền (Auto-Hibernate)** để giải phóng 100% RAM khi chưa dùng tới.
 
 ### 2. Xuất thành Ứng dụng macOS độc lập (`.app`) giống WebCatalog
 - Bất kỳ trang web hoặc tài khoản nào trong WebBox đều có thể **xuất thành file `.app` độc lập** trong `~/Applications` (ví dụ: `Zalo - Cá nhân.app`, `Zalo - Công việc.app`, `Facebook Sale.app`).
@@ -59,5 +59,5 @@ chmod +x build_webbox.sh
 
 Sau khi chạy xong:
 - Ứng dụng hoàn chỉnh: `WebBox.app`
-- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.4.dmg`
-- Bản nén ZIP: `dist/WebBox-v1.0.4-macOS.zip`
+- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.5.dmg`
+- Bản nén ZIP: `dist/WebBox-v1.0.5-macOS.zip`

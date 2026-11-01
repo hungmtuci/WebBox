@@ -24,9 +24,38 @@ enum LinkRouter {
         ("com.vivaldi.Vivaldi", "Vivaldi")
     ]
 
-    /// Returns all web browsers currently installed on this Mac.
+    private static let authHosts: [String] = [
+        "accounts.google.com",
+        "id.zalo.me",
+        "oauth.zaloapp.com",
+        "sso.zalo.me",
+        "appleid.apple.com",
+        "login.microsoftonline.com",
+        "login.live.com",
+        "accounts.youtube.com",
+        "auth0.com",
+        "auth.openai.com"
+    ]
+
+    private static let twoPartSuffixes: Set<String> = [
+        "com.vn", "net.vn", "org.vn", "edu.vn", "gov.vn", "co.uk", "com.au", "co.jp"
+    ]
+
+    private static let browserCacheTTL: CFAbsoluteTime = 30.0
+    private static var cachedBrowsers: [ExternalBrowserInfo] = []
+    private static var lastBrowserScanTime: CFAbsoluteTime = 0
+    private static var cachedDefaultBrowserName: String = ""
+    private static var lastDefaultBrowserCheckTime: CFAbsoluteTime = 0
+    private static var browserIconCache: [String: NSImage] = [:]
+
+    /// Returns all web browsers currently installed on this Mac (cached with 30s TTL to avoid LaunchServices stalls).
     static func installedExternalBrowsers() -> [ExternalBrowserInfo] {
+        let now = CFAbsoluteTimeGetCurrent()
+        if !cachedBrowsers.isEmpty && (now - lastBrowserScanTime) < browserCacheTTL {
+            return cachedBrowsers
+        }
         var found: [ExternalBrowserInfo] = []
+        found.reserveCapacity(knownBrowserCandidates.count)
         for candidate in knownBrowserCandidates {
             if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: candidate.bundleID) {
                 found.append(
@@ -38,16 +67,38 @@ enum LinkRouter {
                 )
             }
         }
+        cachedBrowsers = found
+        lastBrowserScanTime = now
         return found
+    }
+
+    /// Returns a cached, sized icon for an installed external browser without repeatedly reading disk bundles.
+    static func cachedIcon(for browser: ExternalBrowserInfo, size: CGFloat = 16) -> NSImage {
+        let key = "\(browser.bundleIdentifier)_\(Int(size))"
+        if let existing = browserIconCache[key] {
+            return existing
+        }
+        let icon = (NSWorkspace.shared.icon(forFile: browser.appURL.path).copy() as? NSImage)
+            ?? NSWorkspace.shared.icon(forFile: browser.appURL.path)
+        icon.size = NSSize(width: size, height: size)
+        browserIconCache[key] = icon
+        return icon
     }
 
     /// Returns the display name of the system default HTTPS browser (e.g., "Safari" or "Google Chrome").
     static func defaultSystemBrowserName() -> String {
+        let now = CFAbsoluteTimeGetCurrent()
+        if !cachedDefaultBrowserName.isEmpty && (now - lastDefaultBrowserCheckTime) < browserCacheTTL {
+            return cachedDefaultBrowserName
+        }
         guard let probeURL = URL(string: "https://example.com"),
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: probeURL) else {
             return "Trình duyệt mặc định"
         }
-        return appURL.deletingPathExtension().lastPathComponent
+        let resolved = appURL.deletingPathExtension().lastPathComponent
+        cachedDefaultBrowserName = resolved
+        lastDefaultBrowserCheckTime = now
+        return resolved
     }
 
     /// Unwraps common redirector URLs used in chat apps (Facebook, Messenger, Google, YouTube, Zalo redirects).
@@ -137,18 +188,6 @@ enum LinkRouter {
         guard let host = url.host?.lowercased() else { return false }
         let path = url.path.lowercased()
 
-        let authHosts = [
-            "accounts.google.com",
-            "id.zalo.me",
-            "oauth.zaloapp.com",
-            "sso.zalo.me",
-            "appleid.apple.com",
-            "login.microsoftonline.com",
-            "login.live.com",
-            "accounts.youtube.com",
-            "auth0.com",
-            "auth.openai.com"
-        ]
         if authHosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) {
             return true
         }
@@ -196,7 +235,6 @@ enum LinkRouter {
         let parts = host.split(separator: ".").map(String.init)
         guard parts.count >= 2 else { return host }
         // Handle 2-part ccTLDs like .com.vn, .co.uk, .net.vn
-        let twoPartSuffixes: Set<String> = ["com.vn", "net.vn", "org.vn", "edu.vn", "gov.vn", "co.uk", "com.au", "co.jp"]
         let lastTwo = "\(parts[parts.count - 2]).\(parts[parts.count - 1])"
         if twoPartSuffixes.contains(lastTwo), parts.count >= 3 {
             return "\(parts[parts.count - 3]).\(lastTwo)"

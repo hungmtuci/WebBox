@@ -11,7 +11,17 @@ final class AppIconFetcher: ObservableObject {
     /// In-memory cache keyed by preset ID or normalized domain host
     @Published private(set) var cachedPresetIcons: [String: Data] = [:]
     private var inFlightKeys: Set<String> = []
+    private var inFlightTasks: [String: Task<Data?, Never>] = [:]
     private let cacheDirectory: URL
+
+    nonisolated private static let linkTagRegex = try? NSRegularExpression(
+        pattern: #"<link\b[^>]+>"#,
+        options: [.caseInsensitive]
+    )
+    nonisolated private static let hrefAttrRegex = try? NSRegularExpression(
+        pattern: #"href\s*=\s*["']([^"']+)["']"#,
+        options: [.caseInsensitive]
+    )
 
     private static let appStoreSearchTerms: [String: (term: String, mustContain: String)] = [
         "zalo": ("Zalo", "zalo"),
@@ -114,8 +124,30 @@ final class AppIconFetcher: ObservableObject {
         }
     }
 
-    /// Multi-tier icon resolver returning clean normalized PNG data (up to 256x256).
+    /// Multi-tier icon resolver returning clean normalized PNG data (up to 256x256),
+    /// deduplicating concurrent requests for the same catalog preset or domain host.
     func fetchBestIcon(catalogID: String?, appName: String, siteURL: URL) async -> Data? {
+        let dedupKey: String = {
+            if let cid = catalogID, !cid.isEmpty {
+                return "cid:\(cid)"
+            }
+            return "host:\(siteURL.host?.lowercased() ?? siteURL.absoluteString)"
+        }()
+
+        if let existingTask = inFlightTasks[dedupKey] {
+            return await existingTask.value
+        }
+
+        let task = Task<Data?, Never> { @MainActor in
+            await self.resolveIconUncached(catalogID: catalogID, appName: appName, siteURL: siteURL)
+        }
+        inFlightTasks[dedupKey] = task
+        let result = await task.value
+        inFlightTasks.removeValue(forKey: dedupKey)
+        return result
+    }
+
+    private func resolveIconUncached(catalogID: String?, appName: String, siteURL: URL) async -> Data? {
         // 0. Check disk cache for preset first
         if let cid = catalogID, !cid.isEmpty {
             if let mem = cachedPresetIcons[cid] {
@@ -239,7 +271,7 @@ final class AppIconFetcher: ObservableObject {
     nonisolated static func extractIconLinks(fromHTML html: String, baseURL: URL) -> [URL] {
         // Scan <link ...> tags in <head>
         let headSlice = String(html.prefix(48_000))
-        guard let regex = try? NSRegularExpression(pattern: #"<link\b[^>]+>"#, options: [.caseInsensitive]) else {
+        guard let regex = linkTagRegex else {
             return []
         }
 
@@ -255,7 +287,7 @@ final class AppIconFetcher: ObservableObject {
             guard lower.contains("rel=") && lower.contains("icon") && !lower.contains("mask-icon") else {
                 continue
             }
-            guard let href = extractAttribute("href", fromTag: tag), !href.isEmpty else {
+            guard let href = extractHrefAttribute(fromTag: tag), !href.isEmpty else {
                 continue
             }
             guard let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL else {
@@ -271,11 +303,8 @@ final class AppIconFetcher: ObservableObject {
         return touchIcons + standardIcons
     }
 
-    nonisolated private static func extractAttribute(_ attr: String, fromTag tag: String) -> String? {
-        let pattern = "\(attr)\\s*=\\s*[\"']([^\"']+)[\"']"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return nil
-        }
+    nonisolated private static func extractHrefAttribute(fromTag tag: String) -> String? {
+        guard let regex = hrefAttrRegex else { return nil }
         let nsTag = tag as NSString
         guard let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: nsTag.length)),
               match.numberOfRanges > 1 else {

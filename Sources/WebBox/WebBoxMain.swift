@@ -43,6 +43,11 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // Automatically fetch genuine HD icons for any existing or starter accounts
         AppIconFetcher.shared.backfillMissingIcons(in: WorkspaceStore.shared)
         UpdateCheckerService.shared.checkSilentlyOnLaunchIfNeeded()
+        ContextMediaExtractor.cleanupStaleTemporaryFiles()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        WorkspaceStore.shared.flushPendingSaveSynchronously()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -104,6 +109,11 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         guard keyEventMonitor == nil else { return }
         keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            let keyWin = NSApp.keyWindow
+            if WebSessionManager.shared.isImagePreviewWindow(keyWin) || keyWin is NSPanel {
+                return event
+            }
+
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.contains(.command), !flags.contains(.control) else {
                 return event
@@ -198,15 +208,26 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         }
     }
 
+    private var activeTargetInstanceID: UUID? {
+        WebSessionManager.shared.instanceID(forDetachedWindow: NSApp.keyWindow)
+            ?? WorkspaceStore.shared.activeInstanceID
+    }
+
+    private var isFullInAppOverlayActiveInKeyWindow: Bool {
+        let store = WorkspaceStore.shared
+        return WebSessionManager.shared.instanceID(forDetachedWindow: NSApp.keyWindow) == nil
+            && store.isInAppBrowserVisible
+            && store.preferences.inAppBrowserLayout == .fullOverlay
+    }
+
     private func performReload(fromOrigin: Bool) {
         let store = WorkspaceStore.shared
-        if store.isInAppBrowserVisible && store.preferences.inAppBrowserLayout == .fullOverlay,
-           let tab = store.activeInAppTab {
+        if isFullInAppOverlayActiveInKeyWindow, let tab = store.activeInAppTab {
             WebSessionManager.shared.reloadInAppTab(tabID: tab.id)
             store.showToast("Đang tải lại trang trong trình duyệt App...")
             return
         }
-        guard let id = store.activeInstanceID else { return }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.reload(instanceID: id, fromOrigin: fromOrigin)
         store.showToast(fromOrigin ? "Đang tải lại hoàn toàn (bỏ qua bộ nhớ đệm)..." : "Đang tải lại trang...")
     }
@@ -540,27 +561,35 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     @objc private func goBackAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
+        if isFullInAppOverlayActiveInKeyWindow, let tab = WorkspaceStore.shared.activeInAppTab {
+            WebSessionManager.shared.goBackInAppTab(tabID: tab.id)
+            return
+        }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.goBack(instanceID: id)
     }
 
     @objc private func goForwardAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
+        if isFullInAppOverlayActiveInKeyWindow, let tab = WorkspaceStore.shared.activeInAppTab {
+            WebSessionManager.shared.goForwardInAppTab(tabID: tab.id)
+            return
+        }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.goForward(instanceID: id)
     }
 
     @objc private func zoomInAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.adjustZoom(instanceID: id, delta: 0.1)
     }
 
     @objc private func zoomOutAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.adjustZoom(instanceID: id, delta: -0.1)
     }
 
     @objc private func zoomResetAction() {
-        guard let id = WorkspaceStore.shared.activeInstanceID else { return }
+        guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.adjustZoom(instanceID: id, delta: 0, reset: true)
     }
 

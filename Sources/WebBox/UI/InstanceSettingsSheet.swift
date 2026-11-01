@@ -448,7 +448,21 @@ struct GlobalSettingsSheetView: View {
                         Toggle("Hiện nhãn tên tài khoản phụ dưới tên ứng dụng ở thanh bên", isOn: $store.preferences.showAccountLabelsInSidebar)
                     }
                     Toggle("Chế độ Không làm phiền (Tạm tắt toàn bộ thông báo đẩy)", isOn: $store.preferences.globalDoNotDisturb)
+                    Picker("Tự động ngủ đông nền (Giải phóng RAM):", selection: $store.preferences.autoHibernateMinutes) {
+                        Text("Tắt (Luôn giữ hoạt động)").tag(0)
+                        Text("Sau 15 phút không dùng").tag(15)
+                        Text("Sau 30 phút không dùng").tag(30)
+                        Text("Sau 1 giờ không dùng").tag(60)
+                        Text("Sau 2 giờ không dùng").tag(120)
+                    }
+                    .onChange(of: store.preferences.autoHibernateMinutes) { _, _ in
+                        store.save()
+                    }
                     Toggle("Bật công cụ Web Inspector (Inspect Element khi chuột phải)", isOn: $store.preferences.enableDeveloperExtras)
+                        .onChange(of: store.preferences.enableDeveloperExtras) { _, newValue in
+                            WebSessionManager.shared.syncDeveloperExtrasPreference(newValue)
+                            store.save()
+                        }
 
                     LabeledContent("Biểu tượng ứng dụng:") {
                         Button {

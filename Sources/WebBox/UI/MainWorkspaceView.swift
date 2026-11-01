@@ -211,10 +211,14 @@ struct MainWorkspaceView: View {
     // MARK: - Full Expanded Vibrancy Sidebar
 
     private var sidebarColumnView: some View {
-        List(selection: activeSelectionBinding) {
+        let visibleInstances = store.filteredInstances
+        let indexByID = Dictionary(
+            uniqueKeysWithValues: visibleInstances.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        return List(selection: activeSelectionBinding) {
             Section {
-                ForEach(store.filteredInstances) { instance in
-                    sidebarAccountRow(instance: instance)
+                ForEach(visibleInstances) { instance in
+                    sidebarAccountRow(instance: instance, shortcutIndex: indexByID[instance.id])
                 }
                 .onMove { source, destination in
                     store.moveInstances(from: source, to: destination)
@@ -309,10 +313,9 @@ struct MainWorkspaceView: View {
         .help("Lọc theo Không gian làm việc (Spaces)")
     }
 
-    private func sidebarAccountRow(instance: WebAppInstance) -> some View {
+    private func sidebarAccountRow(instance: WebAppInstance, shortcutIndex: Int?) -> some View {
         let rtState = sessionManager.state(for: instance.id)
         let isSplitSecondary = store.secondarySplitInstanceID == instance.id
-        let shortcutIndex = store.filteredInstances.firstIndex(where: { $0.id == instance.id })
 
         return HStack(spacing: 10) {
             AppInstanceAvatarView(instance: instance, size: 28, showBadgePill: true)

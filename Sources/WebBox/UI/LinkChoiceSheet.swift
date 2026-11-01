@@ -210,7 +210,7 @@ struct LinkChoiceOverlayCard: View {
                                         store.pendingLinkPrompt = nil
                                     } label: {
                                         HStack(spacing: 5) {
-                                            Image(nsImage: NSWorkspace.shared.icon(forFile: browser.appURL.path))
+                                            Image(nsImage: LinkRouter.cachedIcon(for: browser, size: 14))
                                                 .resizable()
                                                 .frame(width: 14, height: 14)
                                             Text(browser.name)

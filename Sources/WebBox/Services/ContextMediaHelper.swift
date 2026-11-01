@@ -71,6 +71,42 @@ struct ExtractedContextImage {
 // MARK: - Context Media & Image Extraction Engine
 
 enum ContextMediaExtractor {
+    /// Shared thread-safe Metal CoreImage context so foreground subject lifting never recompiles GPU pipelines per click.
+    private static let sharedCIContext = CIContext(options: [.cacheIntermediates: false])
+
+    /// Asynchronously prunes temporary share/preview files older than 24 hours on app launch.
+    static func cleanupStaleTemporaryFiles() {
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            let cutoff = Date().addingTimeInterval(-86_400)
+            let previewDir = fm.temporaryDirectory.appendingPathComponent("WebBoxMediaPreview", isDirectory: true)
+            if let items = try? fm.contentsOfDirectory(
+                at: previewDir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for url in items {
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    if let modified, modified < cutoff {
+                        try? fm.removeItem(at: url)
+                    }
+                }
+            }
+
+            if let rootTmpItems = try? fm.contentsOfDirectory(
+                at: fm.temporaryDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for url in rootTmpItems where url.lastPathComponent.hasPrefix("WebBoxUpdate_") {
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    if let modified, modified < cutoff {
+                        try? fm.removeItem(at: url)
+                    }
+                }
+            }
+        }
+    }
 
     /// Generates the unified JS user script injected into Instance & In-App Browser WebViews.
     static func makeBridgeScriptSource(
@@ -822,8 +858,7 @@ enum ContextMediaExtractor {
                     croppedToInstancesExtent: true
                 )
                 let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-                let ciContext = CIContext(options: nil)
-                return ciContext.createCGImage(ciImage, from: ciImage.extent)
+                return Self.sharedCIContext.createCGImage(ciImage, from: ciImage.extent)
             } catch {
                 return nil
             }
@@ -1105,10 +1140,19 @@ enum ContextMediaExtractor {
     }
 
     private static func timestampToken() -> String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        return fmt.string(from: Date())
+        let comps = Calendar(identifier: .gregorian).dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: Date()
+        )
+        return String(
+            format: "%04d-%02d-%02d_%02d-%02d-%02d",
+            comps.year ?? 2026,
+            comps.month ?? 1,
+            comps.day ?? 1,
+            comps.hour ?? 0,
+            comps.minute ?? 0,
+            comps.second ?? 0
+        )
     }
 
     static func uniqueFileURL(in directory: URL, suggestedName: String) -> URL {
