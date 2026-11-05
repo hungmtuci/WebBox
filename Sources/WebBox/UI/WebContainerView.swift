@@ -99,10 +99,10 @@ struct InstanceWebPaneView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "moon.zzz.fill")
                         .foregroundStyle(.indigo)
-                    Text("\(instance.displayTitle) đang ngủ đông")
+                    Text(L10n.hibernatingTitle(instance.displayTitle))
                         .font(.title3.weight(.semibold))
                 }
-                Text("WebView tạm ngưng để giải phóng RAM. Phiên đăng nhập (Cookie & IndexedDB) vẫn được giữ nguyên 100%.")
+                Text(L10n.hibernatingDesc)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -112,7 +112,7 @@ struct InstanceWebPaneView: View {
             Button {
                 sessionManager.wakeInstance(instance)
             } label: {
-                Label("Đánh thức tài khoản ngay", systemImage: "bolt.fill")
+                Label(L10n.hibernatingWake, systemImage: "bolt.fill")
                     .font(.callout.weight(.semibold))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
@@ -132,10 +132,10 @@ struct InstanceWebPaneView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "macwindow.on.rectangle")
                         .foregroundStyle(.blue)
-                    Text("\(instance.displayTitle) đang mở ở cửa sổ riêng")
+                    Text(L10n.detachedTitle(instance.displayTitle))
                         .font(.title3.weight(.semibold))
                 }
-                Text("Bạn có thể đặt cửa sổ này sang màn hình thứ hai để theo dõi nhiều tài khoản cùng lúc.")
+                Text(L10n.detachedDesc)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -146,14 +146,14 @@ struct InstanceWebPaneView: View {
                 Button {
                     sessionManager.focusDetachedWindow(instanceID: instance.id)
                 } label: {
-                    Label("Chuyển tới cửa sổ riêng", systemImage: "macwindow")
+                    Label(L10n.detachedSwitchTo, systemImage: "macwindow")
                 }
                 .buttonStyle(.borderedProminent)
 
                 Button {
                     sessionManager.reattachWindowToWorkspace(instanceID: instance.id)
                 } label: {
-                    Label("Đưa về cửa sổ chính", systemImage: "arrow.down.right.and.arrow.up.left")
+                    Label(L10n.detachedBringBack, systemImage: "arrow.down.right.and.arrow.up.left")
                 }
                 .buttonStyle(.bordered)
             }

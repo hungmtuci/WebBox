@@ -315,6 +315,7 @@ struct GlobalWorkspacePreferences: Codable {
     var isSidebarVisible: Bool = true
     var isSidebarCompact: Bool = false
     var showAccountLabelsInSidebar: Bool = true
+    var appLanguage: AppLanguage = .system
     var downloadsDirectory: String = Self.defaultDownloadsDirectoryPath
     var askWhereToSaveEachDownload: Bool = false
     var dedicatedAppsInstallDirectory: String = {
@@ -359,6 +360,7 @@ struct GlobalWorkspacePreferences: Codable {
         case isSidebarVisible
         case isSidebarCompact
         case showAccountLabelsInSidebar
+        case appLanguage
         case downloadsDirectory
         case askWhereToSaveEachDownload
         case dedicatedAppsInstallDirectory
@@ -375,6 +377,7 @@ struct GlobalWorkspacePreferences: Codable {
         isSidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .isSidebarVisible) ?? true
         isSidebarCompact = try c.decodeIfPresent(Bool.self, forKey: .isSidebarCompact) ?? false
         showAccountLabelsInSidebar = try c.decodeIfPresent(Bool.self, forKey: .showAccountLabelsInSidebar) ?? true
+        appLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .appLanguage) ?? .system
         downloadsDirectory = try c.decodeIfPresent(String.self, forKey: .downloadsDirectory) ?? Self.defaultDownloadsDirectoryPath
         askWhereToSaveEachDownload = try c.decodeIfPresent(Bool.self, forKey: .askWhereToSaveEachDownload) ?? false
         let defaultDir = FileManager.default.homeDirectoryForCurrentUser

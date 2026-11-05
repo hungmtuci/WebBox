@@ -7,8 +7,8 @@ cd "$PROJECT_DIR"
 
 APP_NAME="WebBox"
 BUNDLE_ID="com.hunglx.WebBox"
-VERSION="${WEBBOX_VERSION:-1.0.5}"
-BUILD_NUMBER="${WEBBOX_BUILD_NUMBER:-6}"
+VERSION="${WEBBOX_VERSION:-1.0.6}"
+BUILD_NUMBER="${WEBBOX_BUILD_NUMBER:-7}"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 ROOT_APP_BUNDLE="$ROOT_WORKSPACE_DIR/$APP_NAME.app"
 DIST_DIR="$PROJECT_DIR/dist"
@@ -138,7 +138,12 @@ cat > "$STAGE_CONTENTS/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>vi</string>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>vi</string>
+    </array>
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
     <key>CFBundleIconFile</key>
@@ -162,9 +167,9 @@ cat > "$STAGE_CONTENTS/Info.plist" <<EOF
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>WebBox cần quyền Camera để thực hiện cuộc gọi video và chụp ảnh trong Zalo, Messenger, Google Meet.</string>
+    <string>WebBox needs Camera access for video calls and photo sharing.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>WebBox cần quyền Micro để thực hiện cuộc gọi thoại và gửi tin nhắn âm thanh trong các ứng dụng chat.</string>
+    <string>WebBox needs Microphone access for voice calls and voice messages.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
@@ -174,13 +179,49 @@ cat > "$STAGE_CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
+# Create English & Vietnamese localization resources for macOS system sheets (NSSavePanel, NSOpenPanel, menus)
+mkdir -p "$STAGE_RESOURCES/en.lproj" "$STAGE_RESOURCES/vi.lproj"
+
+cat > "$STAGE_RESOURCES/en.lproj/InfoPlist.strings" << 'LOC_EOF'
+"CFBundleDisplayName" = "WebBox";
+"CFBundleName" = "WebBox";
+"NSCameraUsageDescription" = "WebBox needs Camera access for video calls and photo sharing.";
+"NSMicrophoneUsageDescription" = "WebBox needs Microphone access for voice calls and voice messages.";
+LOC_EOF
+
+cat > "$STAGE_RESOURCES/en.lproj/Localizable.strings" << 'LOC_EOF'
+"Save" = "Save";
+"Cancel" = "Cancel";
+"Save Downloaded File" = "Save Downloaded File";
+"Choose Folder" = "Choose Folder";
+LOC_EOF
+
+cat > "$STAGE_RESOURCES/vi.lproj/InfoPlist.strings" << 'LOC_EOF'
+"CFBundleDisplayName" = "WebBox";
+"CFBundleName" = "WebBox";
+"NSCameraUsageDescription" = "WebBox cần quyền Camera để thực hiện cuộc gọi video và chụp ảnh trong Zalo, Messenger, Google Meet.";
+"NSMicrophoneUsageDescription" = "WebBox cần quyền Micro để thực hiện cuộc gọi thoại và gửi tin nhắn âm thanh trong các ứng dụng chat.";
+LOC_EOF
+
+cat > "$STAGE_RESOURCES/vi.lproj/Localizable.strings" << 'LOC_EOF'
+"Save" = "Lưu";
+"Cancel" = "Huỷ";
+"Save Downloaded File" = "Lưu tệp tải xuống";
+"Choose Folder" = "Chọn thư mục";
+LOC_EOF
+
 echo "==> [4/6] Đang ký số (Ad-hoc Codesign)..."
+xattr -d com.apple.FinderInfo "$STAGE_APP" 2>/dev/null || true
 xattr -cr "$STAGE_APP" 2>/dev/null || true
 codesign --force --deep --sign - "$STAGE_APP"
 codesign --verify --deep --strict "$STAGE_APP"
 
 rm -rf "$APP_BUNDLE"
 ditto --noextattr "$STAGE_APP" "$APP_BUNDLE"
+xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+codesign --verify --deep --strict "$APP_BUNDLE" 2>/dev/null || true
 
 echo "==> [5/6] Đang tạo bộ cài đặt .DMG và .ZIP tại thư mục dist/..."
 rm -rf "$DIST_DIR"
@@ -229,6 +270,10 @@ echo "==> [6/6] Đồng bộ $ROOT_APP_BUNDLE..."
 if [ "$ROOT_WORKSPACE_DIR" != "$PROJECT_DIR" ]; then
     rm -rf "$ROOT_APP_BUNDLE"
     ditto --noextattr "$STAGE_APP" "$ROOT_APP_BUNDLE"
+    xattr -d com.apple.FinderInfo "$ROOT_APP_BUNDLE" 2>/dev/null || true
+    xattr -cr "$ROOT_APP_BUNDLE" 2>/dev/null || true
+    codesign --force --deep --sign - "$ROOT_APP_BUNDLE" 2>/dev/null || true
+    codesign --verify --deep --strict "$ROOT_APP_BUNDLE" 2>/dev/null || true
 fi
 
 echo "==> Hoàn tất!"

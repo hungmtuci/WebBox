@@ -7,8 +7,16 @@ final class CatalogUIState: ObservableObject {
     static let shared = CatalogUIState()
 
     enum ModeTab: String, CaseIterable {
-        case directory = "Kho ứng dụng phổ biến"
-        case customURL = "Biến Website bất kỳ thành App"
+        case directory = "directory"
+        case customURL = "customURL"
+
+        @MainActor
+        var title: String {
+            switch self {
+            case .directory: return L10n.catalogPopularApps
+            case .customURL: return L10n.catalogCustomWebsite
+            }
+        }
     }
 
     @Published var selectedMode: ModeTab = .directory
@@ -76,7 +84,9 @@ final class CatalogUIState: ObservableObject {
         let store = WorkspaceStore.shared
         let sameCount = store.instances.filter { $0.catalogID == preset.id }.count
         let nextNum = sameCount + 1
-        presetAccountLabel = sameCount == 0 ? "Cá nhân" : "Tài khoản \(nextNum)"
+        let defaultLabel = L10n.isVietnamese ? "Cá nhân" : "Personal"
+        let acctPrefix = L10n.isVietnamese ? "Tài khoản" : "Account"
+        presetAccountLabel = sameCount == 0 ? defaultLabel : "\(acctPrefix) \(nextNum)"
         presetBadgeShortText = "\(nextNum)"
         presetSelectedSpaceID = store.selectedSpaceID
         presetUseSharedProfile = false
@@ -116,9 +126,9 @@ struct CatalogSheetView: View {
             // Native macOS Sheet Header Bar
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Thêm Ứng Dụng & Tài Khoản Mới")
+                    Text(L10n.catalogHeaderTitle)
                         .font(.headline)
-                    Text("Mỗi tài khoản mới tự động có vùng lưu trữ Cookie & phiên đăng nhập độc lập")
+                    Text(L10n.catalogHeaderSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -128,14 +138,14 @@ struct CatalogSheetView: View {
                 if ui.configuringPreset == nil {
                     Picker("", selection: $ui.selectedMode) {
                         ForEach(CatalogUIState.ModeTab.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Text(mode.title).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 390)
                 }
 
-                Button("Đóng") {
+                Button(L10n.close) {
                     dismiss()
                 }
                 .controlSize(.small)
@@ -184,9 +194,9 @@ struct CatalogSheetView: View {
         HStack(spacing: 0) {
             // Left Native Sidebar List for Categories
             List(selection: categorySelectionBinding) {
-                Section("Danh mục") {
+                Section(L10n.catalogCategories) {
                     ForEach(CatalogCategory.allCases) { cat in
-                        Label(cat.rawValue, systemImage: cat.symbolName)
+                        Label(cat.displayName, systemImage: cat.symbolName)
                             .tag(cat)
                     }
                 }
@@ -196,12 +206,12 @@ struct CatalogSheetView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Không thấy trang web cần tìm?")
+                        Text(L10n.catalogCantFind)
                             .font(.caption.weight(.semibold))
                         Button {
                             ui.selectedMode = .customURL
                         } label: {
-                            Label("Nhập URL bất kỳ...", systemImage: "globe")
+                            Label(L10n.catalogEnterAnyURL, systemImage: "globe")
                                 .frame(maxWidth: .infinity)
                         }
                         .controlSize(.small)
@@ -219,7 +229,7 @@ struct CatalogSheetView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Tìm Zalo, Facebook, Messenger, Shopee, Gmail, ChatGPT...", text: $ui.searchQuery)
+                    TextField(L10n.catalogSearchPrompt, text: $ui.searchQuery)
                         .textFieldStyle(.plain)
                     if !ui.searchQuery.isEmpty {
                         Button {
@@ -273,14 +283,14 @@ struct CatalogSheetView: View {
                         Text(preset.name)
                             .font(.callout.weight(.semibold))
                         if existingCount > 0 {
-                            Text("\(existingCount) nick")
+                            Text(L10n.s("\(existingCount) nick", "\(existingCount) accounts"))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.blue)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.blue.opacity(0.14)))
                         } else if preset.recommendedMultiAccount {
-                            Text("Đa tài khoản")
+                            Text(L10n.catalogMultiAccount)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
@@ -302,7 +312,7 @@ struct CatalogSheetView: View {
                     quickAddPreset(preset, existingCount: existingCount)
                 } label: {
                     Label(
-                        existingCount == 0 ? "Thêm ngay" : "Thêm tài khoản #\(existingCount + 1)",
+                        existingCount == 0 ? L10n.catalogAddNow : L10n.catalogAddAccountNum(existingCount + 1),
                         systemImage: "plus.circle.fill"
                     )
                     .font(.caption.weight(.medium))
@@ -314,7 +324,7 @@ struct CatalogSheetView: View {
                 Button {
                     ui.configuringPreset = preset
                 } label: {
-                    Label("Tuỳ chỉnh", systemImage: "slider.horizontal.3")
+                    Label(L10n.catalogCustomize, systemImage: "slider.horizontal.3")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -334,7 +344,9 @@ struct CatalogSheetView: View {
 
     private func quickAddPreset(_ preset: CatalogAppPreset, existingCount: Int) {
         let nextNum = existingCount + 1
-        let label = existingCount == 0 ? "Cá nhân" : "Tài khoản \(nextNum)"
+        let defaultLabel = L10n.isVietnamese ? "Cá nhân" : "Personal"
+        let acctPrefix = L10n.isVietnamese ? "Tài khoản" : "Account"
+        let label = existingCount == 0 ? defaultLabel : "\(acctPrefix) \(nextNum)"
         let badge = "\(nextNum)"
         let inst = preset.makeInstance(
             accountLabel: label,
@@ -351,7 +363,7 @@ struct CatalogSheetView: View {
     private var customWebsiteBuilderBody: some View {
         VStack(spacing: 0) {
             Form {
-                Section("Trang web & Biểu tượng ứng dụng") {
+                Section(L10n.catalogWebsiteAndIcon) {
                     HStack(spacing: 16) {
                         let previewInst = WebAppInstance(
                             name: ui.customAppName.isEmpty ? "Web" : ui.customAppName,
@@ -378,20 +390,20 @@ struct CatalogSheetView: View {
                                     if ui.isFetchingMetadata {
                                         ProgressView().controlSize(.small)
                                     } else {
-                                        Label("Tự lấy Tên & Icon", systemImage: "sparkles")
+                                        Label(L10n.catalogAutoFetchNameAndIcon, systemImage: "sparkles")
                                     }
                                 }
                                 .disabled(ui.customURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ui.isFetchingMetadata)
                             }
 
                             HStack(spacing: 8) {
-                                Button("Chọn ảnh Icon từ máy...") {
+                                Button(L10n.catalogChooseIconFromDisk) {
                                     chooseCustomIconImage()
                                 }
                                 .controlSize(.small)
 
                                 if ui.customIconData != nil {
-                                    Button("Xoá ảnh đã chọn") {
+                                    Button(L10n.catalogRemoveChosenIcon) {
                                         ui.customIconData = nil
                                     }
                                     .controlSize(.small)
@@ -416,20 +428,20 @@ struct CatalogSheetView: View {
                         }
                     }
 
-                    TextField("Tên ứng dụng:", text: $ui.customAppName, prompt: Text("VD: CRM Nội Bộ, Gmail, Zalo..."))
-                    TextField("Nhãn tài khoản:", text: $ui.customAccountLabel, prompt: Text("VD: Cá nhân, Công ty, Sale 1..."))
-                    TextField("Huy hiệu góc Icon:", text: $ui.customBadgeText, prompt: Text("VD: 1, 2, CV (Không bắt buộc)"))
+                    TextField(L10n.catalogAppNameLabel, text: $ui.customAppName, prompt: Text(L10n.catalogAppNamePrompt))
+                    TextField(L10n.accountLabel, text: $ui.customAccountLabel, prompt: Text(L10n.catalogAccountLabelPrompt))
+                    TextField(L10n.catalogBadgeCornerSymbol, text: $ui.customBadgeText, prompt: Text(L10n.catalogBadgePrompt))
                 }
 
-                Section("Phân nhóm & Chế độ mở đường link") {
-                    Picker("Khi bấm link trong tin nhắn:", selection: $ui.customLinkMode) {
+                Section(L10n.catalogGroupingAndLinks) {
+                    Picker(L10n.catalogWhenClickingLink, selection: $ui.customLinkMode) {
                         ForEach(LinkRoutingMode.allCases) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
 
-                    Picker("Không gian (Space):", selection: $ui.customSpaceID) {
-                        Text("Hiện ở Tất cả").tag(UUID?.none)
+                    Picker(L10n.catalogSpaceLabel, selection: $ui.customSpaceID) {
+                        Text(L10n.catalogShowInAllSpaces).tag(UUID?.none)
                         ForEach(store.spaces) { sp in
                             Text(sp.name).tag(UUID?.some(sp.id))
                         }
@@ -437,9 +449,9 @@ struct CatalogSheetView: View {
                 }
 
                 Section("Dedicated Desktop App (.app)") {
-                    Toggle("Đồng thời xuất thành tệp ứng dụng .app riêng trong ~/Applications", isOn: $ui.customExportDedicatedApp)
+                    Toggle(L10n.catalogExportDedicatedToggle, isOn: $ui.customExportDedicatedApp)
                     if ui.customExportDedicatedApp {
-                        Toggle("Ghim ứng dụng này vào thanh Dock của macOS", isOn: $ui.customPinToDock)
+                        Toggle(L10n.catalogPinToDockToggle, isOn: $ui.customPinToDock)
                     }
                 }
 
@@ -457,13 +469,13 @@ struct CatalogSheetView: View {
 
             HStack {
                 Spacer()
-                Button("Huỷ") {
+                Button(L10n.cancel) {
                     dismiss()
                 }
                 Button {
                     createCustomWebsiteApp()
                 } label: {
-                    Text(ui.customExportDedicatedApp ? "Tạo & Xuất .app" : "Thêm vào WebBox")
+                    Text(ui.customExportDedicatedApp ? L10n.catalogCreateAndExportApp : L10n.catalogAddToWebBox)
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -604,26 +616,26 @@ private struct PresetConfigurationDetailView: View {
                     }
                 }
 
-                Section("Nhận diện tài khoản") {
-                    TextField("Nhãn phân biệt tài khoản:", text: $ui.presetAccountLabel, prompt: Text("VD: Cá nhân, Công việc, Nick Bán Hàng..."))
-                    TextField("Ký hiệu góc Icon:", text: $ui.presetBadgeShortText, prompt: Text("VD: 1, 2, CV"))
+                Section(L10n.catalogAccountIdentification) {
+                    TextField(L10n.catalogAccountDistinguishLabel, text: $ui.presetAccountLabel, prompt: Text(L10n.catalogAccountDistinguishPrompt))
+                    TextField(L10n.catalogBadgeCornerSymbol, text: $ui.presetBadgeShortText, prompt: Text("VD: 1, 2, CV"))
 
-                    Picker("Không gian (Space):", selection: $ui.presetSelectedSpaceID) {
-                        Text("Tất cả").tag(UUID?.none)
+                    Picker(L10n.catalogSpaceLabel, selection: $ui.presetSelectedSpaceID) {
+                        Text(L10n.catalogAllSpaces).tag(UUID?.none)
                         ForEach(store.spaces) { sp in
                             Text(sp.name).tag(UUID?.some(sp.id))
                         }
                     }
                 }
 
-                Section("Phiên đăng nhập & Cookie") {
-                    Picker("Chế độ cô lập Cookie:", selection: $ui.presetUseSharedProfile) {
-                        Text("Tạo phiên độc lập hoàn toàn mới (Khuyên dùng)").tag(false)
-                        Text("Dùng chung Cookie với tài khoản có sẵn (VD: chung FB & Messenger)").tag(true)
+                Section(L10n.catalogSessionAndCookies) {
+                    Picker(L10n.catalogCookieIsolationMode, selection: $ui.presetUseSharedProfile) {
+                        Text(L10n.catalogIsolatedSessionRecommended).tag(false)
+                        Text(L10n.catalogSharedSession).tag(true)
                     }
 
                     if ui.presetUseSharedProfile && !store.profiles.isEmpty {
-                        Picker("Chọn phiên dùng chung:", selection: $ui.presetSelectedSharedProfileID) {
+                        Picker(L10n.catalogChooseSharedSession, selection: $ui.presetSelectedSharedProfileID) {
                             ForEach(store.profiles) { prof in
                                 Text(prof.name).tag(UUID?.some(prof.id))
                             }
@@ -631,18 +643,18 @@ private struct PresetConfigurationDetailView: View {
                     }
                 }
 
-                Section("Mở đường link & Xuất ứng dụng độc lập") {
-                    Picker("Khi bấm đường link trong tin nhắn:", selection: $ui.presetLinkRoutingMode) {
+                Section(L10n.catalogLinkAndDedicatedSection) {
+                    Picker(L10n.catalogWhenClickingLink, selection: $ui.presetLinkRoutingMode) {
                         ForEach(LinkRoutingMode.allCases) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
 
-                    Toggle("Xuất thành ứng dụng macOS độc lập (.app) trong ~/Applications", isOn: $ui.presetExportDedicatedApp)
+                    Toggle(L10n.catalogExportDedicatedInApps, isOn: $ui.presetExportDedicatedApp)
 
                     if ui.presetExportDedicatedApp {
-                        Toggle("Ghim vào thanh Dock macOS", isOn: $ui.presetPinDedicatedToDock)
-                        Toggle("Khởi chạy ngay sau khi tạo", isOn: $ui.presetLaunchDedicatedImmediately)
+                        Toggle(L10n.catalogPinDedicatedToDock, isOn: $ui.presetPinDedicatedToDock)
+                        Toggle(L10n.catalogLaunchDedicatedImmediately, isOn: $ui.presetLaunchDedicatedImmediately)
                     }
                 }
             }
@@ -654,7 +666,7 @@ private struct PresetConfigurationDetailView: View {
                 Button {
                     onBack()
                 } label: {
-                    Label("Quay lại kho ứng dụng", systemImage: "chevron.left")
+                    Label(L10n.catalogBackToCatalog, systemImage: "chevron.left")
                 }
 
                 Spacer()
@@ -684,7 +696,7 @@ private struct PresetConfigurationDetailView: View {
                     }
                     onCreated()
                 } label: {
-                    Text(ui.presetExportDedicatedApp ? "Tạo tài khoản & Xuất .app" : "Thêm tài khoản")
+                    Text(ui.presetExportDedicatedApp ? L10n.catalogCreateAccountAndExportApp : L10n.catalogAddAccount)
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)

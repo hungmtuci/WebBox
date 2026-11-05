@@ -224,12 +224,12 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         let store = WorkspaceStore.shared
         if isFullInAppOverlayActiveInKeyWindow, let tab = store.activeInAppTab {
             WebSessionManager.shared.reloadInAppTab(tabID: tab.id)
-            store.showToast("Đang tải lại trang trong trình duyệt App...")
+            store.showToast(L10n.s("Đang tải lại trang trong trình duyệt App...", "Reloading in-app browser tab..."))
             return
         }
         guard let id = activeTargetInstanceID else { return }
         WebSessionManager.shared.reload(instanceID: id, fromOrigin: fromOrigin)
-        store.showToast(fromOrigin ? "Đang tải lại hoàn toàn (bỏ qua bộ nhớ đệm)..." : "Đang tải lại trang...")
+        store.showToast(fromOrigin ? L10n.s("Đang tải lại hoàn toàn (bỏ qua bộ nhớ đệm)...", "Reloading completely (ignoring cache)...") : L10n.s("Đang tải lại trang...", "Reloading page..."))
     }
 
     // MARK: - UNUserNotificationCenterDelegate
@@ -278,21 +278,21 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenu.addItem(
-            withTitle: "Giới thiệu về \(appTitle)",
+            withTitle: String(format: L10n.menuAbout, appTitle),
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
 
         if !store.isStandaloneMode {
             let checkUpdateItem = appMenu.addItem(
-                withTitle: "Kiểm tra cập nhật từ GitHub...",
+                withTitle: L10n.menuCheckUpdates,
                 action: #selector(checkForGitHubUpdatesAction),
                 keyEquivalent: "u"
             )
             checkUpdateItem.target = self
 
             let openRepoItem = appMenu.addItem(
-                withTitle: "Mở trang GitHub dự án (hungmtuci/WebBox)...",
+                withTitle: L10n.menuOpenGitHubRepo,
                 action: #selector(openGitHubRepoAction),
                 keyEquivalent: ""
             )
@@ -302,7 +302,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         appMenu.addItem(.separator())
 
         let settingsItem = appMenu.addItem(
-            withTitle: "Cài đặt...",
+            withTitle: L10n.settings,
             action: #selector(openPreferencesAction),
             keyEquivalent: ","
         )
@@ -310,7 +310,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         if !store.isStandaloneMode {
             let dedicatedMgrItem = appMenu.addItem(
-                withTitle: "Quản lý Dedicated .app độc lập...",
+                withTitle: L10n.menuDedicatedApps,
                 action: #selector(openDedicatedAppsManagerAction),
                 keyEquivalent: "d"
             )
@@ -320,24 +320,24 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "Ẩn \(appTitle)",
+            withTitle: String(format: L10n.menuHide, appTitle),
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h"
         )
         let hideOthers = appMenu.addItem(
-            withTitle: "Ẩn các ứng dụng khác",
+            withTitle: L10n.menuHideOthers,
             action: #selector(NSApplication.hideOtherApplications(_:)),
             keyEquivalent: "h"
         )
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(
-            withTitle: "Hiện tất cả",
+            withTitle: L10n.menuShowAll,
             action: #selector(NSApplication.unhideAllApplications(_:)),
             keyEquivalent: ""
         )
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "Thoát \(appTitle)",
+            withTitle: String(format: L10n.menuQuit, appTitle),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -346,18 +346,18 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // 2. Account / App Menu
         let fileMenuItem = NSMenuItem()
         mainMenu.addItem(fileMenuItem)
-        let fileMenu = NSMenu(title: "Ứng dụng")
+        let fileMenu = NSMenu(title: L10n.menuAppCategory)
 
         if !store.isStandaloneMode {
             let newAppItem = fileMenu.addItem(
-                withTitle: "Thêm Ứng dụng / Website mới...",
+                withTitle: L10n.menuNewApp,
                 action: #selector(openCatalogAction),
                 keyEquivalent: "n"
             )
             newAppItem.target = self
 
             let cloneAccountItem = fileMenu.addItem(
-                withTitle: "Nhân bản thêm Tài khoản mới của App hiện tại",
+                withTitle: L10n.menuCloneAccount,
                 action: #selector(cloneCurrentAccountAction),
                 keyEquivalent: "n"
             )
@@ -365,7 +365,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             cloneAccountItem.target = self
 
             let exportDedicatedItem = fileMenu.addItem(
-                withTitle: "Xuất tài khoản hiện tại thành Dedicated .app",
+                withTitle: L10n.menuExportDedicated,
                 action: #selector(exportCurrentAsDedicatedAppAction),
                 keyEquivalent: "e"
             )
@@ -376,7 +376,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         }
 
         let openMainWinItem = fileMenu.addItem(
-            withTitle: "Mở cửa sổ chính",
+            withTitle: L10n.menuOpenMainWindow,
             action: #selector(reopenMainWindowAction),
             keyEquivalent: "0"
         )
@@ -384,7 +384,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         openMainWinItem.target = self
 
         fileMenu.addItem(
-            withTitle: "Đóng cửa sổ",
+            withTitle: L10n.menuCloseWindow,
             action: #selector(NSWindow.performClose(_:)),
             keyEquivalent: "w"
         )
@@ -393,18 +393,18 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // 3. Edit Menu
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
-        let editMenu = NSMenu(title: "Chỉnh sửa")
-        editMenu.addItem(withTitle: "Hoàn tác", action: Selector(("undo:")), keyEquivalent: "z")
-        let redoItem = editMenu.addItem(withTitle: "Làm lại", action: Selector(("redo:")), keyEquivalent: "Z")
+        let editMenu = NSMenu(title: L10n.menuEditCategory)
+        editMenu.addItem(withTitle: L10n.menuUndo, action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = editMenu.addItem(withTitle: L10n.menuRedo, action: Selector(("redo:")), keyEquivalent: "Z")
         redoItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cắt", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Sao chép", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Dán", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Chọn tất cả", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: L10n.menuCut, action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: L10n.menuCopy, action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: L10n.menuPaste, action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: L10n.menuSelectAll, action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
         let findItem = editMenu.addItem(
-            withTitle: "Tìm trong trang...",
+            withTitle: L10n.menuFindInPage,
             action: #selector(toggleFindBarAction),
             keyEquivalent: "f"
         )
@@ -414,17 +414,17 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // 4. View & Navigation Menu
         let viewMenuItem = NSMenuItem()
         mainMenu.addItem(viewMenuItem)
-        let viewMenu = NSMenu(title: "Hiển thị")
+        let viewMenu = NSMenu(title: L10n.menuViewCategory)
 
         let reloadItem = viewMenu.addItem(
-            withTitle: "Tải lại trang",
+            withTitle: L10n.menuReload,
             action: #selector(reloadActiveAction),
             keyEquivalent: "r"
         )
         reloadItem.target = self
 
         let hardReloadItem = viewMenu.addItem(
-            withTitle: "Tải lại trang (Bỏ qua bộ nhớ đệm)",
+            withTitle: L10n.menuHardReload,
             action: #selector(hardReloadActiveAction),
             keyEquivalent: "R"
         )
@@ -432,14 +432,14 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         hardReloadItem.target = self
 
         let backItem = viewMenu.addItem(
-            withTitle: "Quay lại",
+            withTitle: L10n.menuBack,
             action: #selector(goBackAction),
             keyEquivalent: "["
         )
         backItem.target = self
 
         let forwardItem = viewMenu.addItem(
-            withTitle: "Tiến tới",
+            withTitle: L10n.menuForward,
             action: #selector(goForwardAction),
             keyEquivalent: "]"
         )
@@ -448,21 +448,21 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         viewMenu.addItem(.separator())
 
         let zoomIn = viewMenu.addItem(
-            withTitle: "Phóng to nội dung",
+            withTitle: L10n.menuZoomIn,
             action: #selector(zoomInAction),
             keyEquivalent: "+"
         )
         zoomIn.target = self
 
         let zoomOut = viewMenu.addItem(
-            withTitle: "Thu nhỏ nội dung",
+            withTitle: L10n.menuZoomOut,
             action: #selector(zoomOutAction),
             keyEquivalent: "-"
         )
         zoomOut.target = self
 
         let zoomReset = viewMenu.addItem(
-            withTitle: "Kích thước mặc định (100%)",
+            withTitle: L10n.menuZoomReset,
             action: #selector(zoomResetAction),
             keyEquivalent: "0"
         )
@@ -472,7 +472,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             viewMenu.addItem(.separator())
 
             let compactSidebarItem = viewMenu.addItem(
-                withTitle: "Thu gọn / Mở rộng thanh bên chỉ hiện Icon",
+                withTitle: L10n.menuToggleCompactSidebar,
                 action: #selector(toggleCompactSidebarAction),
                 keyEquivalent: "s"
             )
@@ -480,7 +480,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             compactSidebarItem.target = self
 
             let toggleSidebarItem = viewMenu.addItem(
-                withTitle: "Ẩn / Hiện hoàn toàn thanh bên trái",
+                withTitle: L10n.menuToggleSidebar,
                 action: #selector(toggleLeftSidebarAction),
                 keyEquivalent: "\\"
             )
@@ -490,7 +490,7 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             viewMenu.addItem(.separator())
             for num in 1...9 {
                 let swItem = viewMenu.addItem(
-                    withTitle: "Chuyển sang Tài khoản #\(num)",
+                    withTitle: L10n.menuSwitchAccount(number: num),
                     action: #selector(switchAccountShortcut(_:)),
                     keyEquivalent: "\(num)"
                 )
@@ -503,9 +503,9 @@ final class WebBoxAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         // 5. Window Menu
         let winMenuItem = NSMenuItem()
         mainMenu.addItem(winMenuItem)
-        let winMenu = NSMenu(title: "Cửa sổ")
-        winMenu.addItem(withTitle: "Thu nhỏ", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        winMenu.addItem(withTitle: "Phóng to toàn màn hình", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "")
+        let winMenu = NSMenu(title: L10n.menuWindowCategory)
+        winMenu.addItem(withTitle: L10n.menuMinimize, action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        winMenu.addItem(withTitle: L10n.menuZoomFullScreen, action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "")
         winMenuItem.submenu = winMenu
         NSApp.windowsMenu = winMenu
 

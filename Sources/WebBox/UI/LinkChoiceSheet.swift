@@ -34,10 +34,10 @@ struct LinkChoiceOverlayCard: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            Text("Bạn muốn mở đường dẫn này ở đâu?")
+                            Text(L10n.linkChoicePromptTitle)
                                 .font(.headline)
                             if prompt.wasUnwrapped {
-                                Text("Đã lọc link sạch")
+                                Text(L10n.linkChoiceCleanUnwrapped)
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.green)
                                     .padding(.horizontal, 6)
@@ -45,7 +45,7 @@ struct LinkChoiceOverlayCard: View {
                                     .background(Capsule().fill(Color.green.opacity(0.14)))
                             }
                         }
-                        Text("Từ tin nhắn trong \(prompt.sourceInstanceTitle)")
+                        Text(L10n.linkChoiceFromSource(prompt.sourceInstanceTitle))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -77,9 +77,9 @@ struct LinkChoiceOverlayCard: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(prompt.resolvedURL.absoluteString, forType: .string)
                             store.pendingLinkPrompt = nil
-                            store.showToast("Đã sao chép liên kết")
+                            store.showToast(L10n.s("Đã sao chép liên kết", "Link copied to Clipboard"))
                         } label: {
-                            Label("Sao chép", systemImage: "doc.on.doc")
+                            Label(L10n.copy, systemImage: "doc.on.doc")
                                 .font(.caption.weight(.medium))
                         }
                         .buttonStyle(.bordered)
@@ -123,10 +123,10 @@ struct LinkChoiceOverlayCard: View {
                                     .padding(.vertical, 2)
                                     .background(Capsule().fill(.white.opacity(0.18)))
                             }
-                            Text("Mở trong Trình duyệt App")
+                            Text(L10n.linkChoiceInAppTitle)
                                 .font(.callout.weight(.bold))
                                 .foregroundStyle(.white)
-                            Text("Xem ngay cạnh cuộc trò chuyện (giữ phiên đăng nhập, có nút mở ra ngoài)")
+                            Text(L10n.linkChoiceInAppSubtitle)
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.86))
                                 .multilineTextAlignment(.leading)
@@ -168,10 +168,10 @@ struct LinkChoiceOverlayCard: View {
                                     .padding(.vertical, 2)
                                     .background(Capsule().fill(Color.primary.opacity(0.08)))
                             }
-                            Text("Mở bằng Trình duyệt ngoài")
+                            Text(L10n.linkChoiceExternalTitle)
                                 .font(.callout.weight(.bold))
                                 .foregroundStyle(.primary)
-                            Text("Chuyển sang \(preferredBrowserLabel) trên macOS để xem trong tab độc lập")
+                            Text(String(format: L10n.linkChoiceExternalSubtitle("%@"), preferredBrowserLabel))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.leading)
@@ -195,7 +195,7 @@ struct LinkChoiceOverlayCard: View {
                 // Quick Pick Specific Installed Browsers (Safari, Chrome, Cốc Cốc, Arc...)
                 if installedBrowsers.count > 1 {
                     HStack(spacing: 8) {
-                        Text("Mở nhanh với:")
+                        Text(L10n.linkChoiceQuickOpenWith)
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -239,14 +239,14 @@ struct LinkChoiceOverlayCard: View {
                 // Footer: Remember preference & Modifier tips
                 HStack {
                     Toggle(isOn: $store.rememberLinkChoiceForApp) {
-                        Text("Ghi nhớ lựa chọn cho **\(prompt.sourceInstanceTitle)**")
+                        Text(String(format: L10n.s("Ghi nhớ lựa chọn cho **%@**", "Remember choice for **%@**"), prompt.sourceInstanceTitle))
                             .font(.caption)
                     }
                     .toggleStyle(.checkbox)
 
                     Spacer()
 
-                    Text("Mẹo: Giữ ⌘+Click mở trong App • ⌥+Click mở trình duyệt ngoài")
+                    Text(L10n.linkChoiceModifierTips)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

@@ -887,8 +887,8 @@ enum ContextMediaExtractor {
 
         if forceSavePanel || store.preferences.askWhereToSaveEachDownload {
             let panel = NSSavePanel()
-            panel.title = "Lưu tệp tải xuống"
-            panel.prompt = "Lưu"
+            panel.title = L10n.saveDownloadedFile
+            panel.prompt = L10n.save
             panel.canCreateDirectories = true
             panel.directoryURL = downloadsDir
             panel.nameFieldStringValue = suggestedFilename
@@ -1227,7 +1227,7 @@ final class ImagePreviewWindow: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        win.title = "Xem hình ảnh — \(sourceTitle) (\(extracted.pixelWidth) × \(extracted.pixelHeight))"
+        win.title = L10n.imagePreviewTitle(source: sourceTitle, width: extracted.pixelWidth, height: extracted.pixelHeight)
         win.minSize = NSSize(width: 480, height: 340)
         win.isReleasedWhenClosed = false
         win.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
@@ -1274,7 +1274,7 @@ final class ImagePreviewWindow: NSObject, NSWindowDelegate {
 
         // Zoom controls
         let zoomOutBtn = makeBarButton(title: "", symbol: "minus.magnifyingglass", action: #selector(zoomOutAction))
-        zoomOutBtn.toolTip = "Thu nhỏ (⌘-)"
+        zoomOutBtn.toolTip = L10n.imgZoomOutTooltip
 
         zoomLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         zoomLabel.textColor = .secondaryLabelColor
@@ -1282,10 +1282,10 @@ final class ImagePreviewWindow: NSObject, NSWindowDelegate {
         zoomLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
 
         let zoomInBtn = makeBarButton(title: "", symbol: "plus.magnifyingglass", action: #selector(zoomInAction))
-        zoomInBtn.toolTip = "Phóng to (⌘+)"
+        zoomInBtn.toolTip = L10n.imgZoomInTooltip
 
-        let fitBtn = makeBarButton(title: "Vừa khung", symbol: "arrow.up.left.and.arrow.down.right", action: #selector(resetZoomAction))
-        fitBtn.toolTip = "Thu phóng vừa khung cửa sổ (⌘0)"
+        let fitBtn = makeBarButton(title: L10n.imgFitTitle, symbol: "arrow.up.left.and.arrow.down.right", action: #selector(resetZoomAction))
+        fitBtn.toolTip = L10n.imgFitTooltip
 
         stack.addArrangedSubview(zoomOutBtn)
         stack.addArrangedSubview(zoomLabel)
@@ -1297,24 +1297,24 @@ final class ImagePreviewWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(spacer)
 
         // Action buttons
-        let copyBtn = makeBarButton(title: "Sao chép", symbol: "doc.on.doc", action: #selector(copyImageAction))
-        copyBtn.toolTip = "Sao chép hình ảnh vào Clipboard (⌘C)"
+        let copyBtn = makeBarButton(title: L10n.copy, symbol: "doc.on.doc", action: #selector(copyImageAction))
+        copyBtn.toolTip = L10n.imgCopyTooltip
 
-        let subjectBtn = makeBarButton(title: "Sao chép chủ thể", symbol: "sparkles", action: #selector(copySubjectAction))
-        subjectBtn.toolTip = "Tách nền AI và sao chép chủ thể"
+        let subjectBtn = makeBarButton(title: L10n.ctxCopySubject, symbol: "sparkles", action: #selector(copySubjectAction))
+        subjectBtn.toolTip = L10n.imgSubjectTooltip
 
-        let downloadBtn = makeBarButton(title: "Tải về", symbol: "arrow.down.circle.fill", action: #selector(downloadImageAction))
+        let downloadBtn = makeBarButton(title: L10n.download, symbol: "arrow.down.circle.fill", action: #selector(downloadImageAction))
         downloadBtn.bezelColor = .controlAccentColor
-        downloadBtn.toolTip = "Lưu ngay vào thư mục Tải xuống (⌘S)"
+        downloadBtn.toolTip = L10n.imgDownloadTooltip
 
-        let saveAsBtn = makeBarButton(title: "Lưu thành...", symbol: "folder", action: #selector(saveAsAction))
-        saveAsBtn.toolTip = "Chọn thư mục lưu hình ảnh"
+        let saveAsBtn = makeBarButton(title: L10n.saveAs, symbol: "folder", action: #selector(saveAsAction))
+        saveAsBtn.toolTip = L10n.imgSaveAsTooltip
 
-        let openPreviewBtn = makeBarButton(title: "Xem trước", symbol: "eye", action: #selector(openInMacOSPreviewAction))
-        openPreviewBtn.toolTip = "Mở bằng ứng dụng Xem trước (Preview) của macOS"
+        let openPreviewBtn = makeBarButton(title: L10n.imgPreviewAppTitle, symbol: "eye", action: #selector(openInMacOSPreviewAction))
+        openPreviewBtn.toolTip = L10n.imgPreviewAppTooltip
 
-        let shareBtn = makeBarButton(title: "Chia sẻ", symbol: "square.and.arrow.up", action: #selector(shareAction(_:)))
-        shareBtn.toolTip = "Chia sẻ qua AirDrop, Tin nhắn, Mail, Ảnh..."
+        let shareBtn = makeBarButton(title: L10n.s("Chia sẻ", "Share"), symbol: "square.and.arrow.up", action: #selector(shareAction(_:)))
+        shareBtn.toolTip = L10n.imgShareTooltip
 
         stack.addArrangedSubview(copyBtn)
         stack.addArrangedSubview(subjectBtn)

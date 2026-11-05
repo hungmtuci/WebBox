@@ -48,9 +48,9 @@ struct InAppBrowserPaneView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "Chưa có trang nào mở",
+                    L10n.inAppNoTabsOpen,
                     systemImage: "globe",
-                    description: Text("Bấm vào bất kỳ đường link nào trong tin nhắn để xem ngay tại đây.")
+                    description: Text(L10n.inAppNoTabsDesc)
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -125,7 +125,7 @@ struct InAppBrowserPaneView: View {
                             .padding(5)
                     }
                     .buttonStyle(.plain)
-                    .help("Mở thêm tab mới trong trình duyệt App")
+                    .help(L10n.inAppNewTabTooltip)
                 }
                 .padding(.vertical, 4)
             }
@@ -145,7 +145,7 @@ struct InAppBrowserPaneView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help(store.preferences.inAppBrowserLayout == .splitRight ? "Mở rộng toàn khung cửa sổ" : "Thu về dạng Chia đôi cạnh cuộc trò chuyện")
+            .help(store.preferences.inAppBrowserLayout == .splitRight ? L10n.inAppExpandFullTooltip : L10n.inAppSplitRightTooltip)
 
             // Hide / Minimize In-App Browser (keeps tabs alive!)
             Button {
@@ -156,7 +156,7 @@ struct InAppBrowserPaneView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Thu gọn khung trình duyệt (giữ lại các tab đang mở)")
+            .help(L10n.inAppMinimizeTooltip)
 
             // Close all tabs
             Button {
@@ -167,7 +167,7 @@ struct InAppBrowserPaneView: View {
             }
             .buttonStyle(.plain)
             .padding(.trailing, 8)
-            .help("Đóng tất cả tab trình duyệt trong App")
+            .help(L10n.inAppCloseAllTabsTooltip)
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
     }
@@ -206,7 +206,7 @@ struct InAppBrowserPaneView: View {
                     .font(.caption2)
                     .foregroundStyle(tab.currentURL.scheme == "https" ? .green : .secondary)
 
-                TextField("Nhập địa chỉ web hoặc từ khoá tìm kiếm...", text: $store.inAppAddressBarText)
+                TextField(L10n.inAppAddressPlaceholder, text: $store.inAppAddressBarText)
                     .textFieldStyle(.plain)
                     .font(.system(.caption, design: .monospaced))
                     .onSubmit {
@@ -216,14 +216,14 @@ struct InAppBrowserPaneView: View {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(tab.currentURL.absoluteString, forType: .string)
-                    store.showToast("Đã sao chép URL hiện tại")
+                    store.showToast(L10n.inAppCopiedURL)
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Sao chép đường dẫn hiện tại")
+                .help(L10n.inAppCopyURLTooltip)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -243,7 +243,7 @@ struct InAppBrowserPaneView: View {
                     let pref = store.instance(for: tab.ownerInstanceID)?.preferredExternalBrowserBundleID
                     LinkRouter.openInExternalBrowser(tab.currentURL, preferredBrowserBundleID: pref)
                 } label: {
-                    Label("Mở bằng trình duyệt mặc định (\(defaultName))", systemImage: "safari")
+                    Label(L10n.inAppOpenExternalDefault(defaultName), systemImage: "safari")
                 }
 
                 let browsers = LinkRouter.installedExternalBrowsers()
@@ -253,12 +253,12 @@ struct InAppBrowserPaneView: View {
                         Button {
                             LinkRouter.openInExternalBrowser(tab.currentURL, preferredBrowserBundleID: browser.bundleIdentifier)
                         } label: {
-                            Text("Mở bằng \(browser.name)")
+                            Text(L10n.inAppOpenWithBrowser(browser.name))
                         }
                     }
                 }
             } label: {
-                Label("Mở ngoài", systemImage: "arrow.up.right.square.fill")
+                Label(L10n.inAppOpenExternal, systemImage: "arrow.up.right.square.fill")
                     .font(.caption.weight(.semibold))
             } primaryAction: {
                 let pref = store.instance(for: tab.ownerInstanceID)?.preferredExternalBrowserBundleID
@@ -266,7 +266,7 @@ struct InAppBrowserPaneView: View {
             }
             .menuStyle(.borderedButton)
             .controlSize(.small)
-            .help("Mở trang đang xem ra trình duyệt ngoài của macOS (bấm mũi tên để chọn trình duyệt)")
+            .help(L10n.inAppOpenExternalHelp)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

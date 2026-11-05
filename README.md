@@ -59,5 +59,5 @@ chmod +x build_webbox.sh
 
 Sau khi chạy xong:
 - Ứng dụng hoàn chỉnh: `WebBox.app`
-- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.5.dmg`
-- Bản nén ZIP: `dist/WebBox-v1.0.5-macOS.zip`
+- Bộ cài đặt DMG: `dist/WebBox-Installer-v1.0.6.dmg`
+- Bản nén ZIP: `dist/WebBox-v1.0.6-macOS.zip`

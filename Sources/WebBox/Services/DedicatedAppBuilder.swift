@@ -113,7 +113,12 @@ enum DedicatedAppBuilder {
         <plist version="1.0">
         <dict>
             <key>CFBundleDevelopmentRegion</key>
-            <string>vi</string>
+            <string>en</string>
+            <key>CFBundleLocalizations</key>
+            <array>
+                <string>en</string>
+                <string>vi</string>
+            </array>
             <key>CFBundleExecutable</key>
             <string>\(executableName)</string>
             <key>CFBundleIconFile</key>
@@ -137,9 +142,9 @@ enum DedicatedAppBuilder {
             <key>NSHighResolutionCapable</key>
             <true/>
             <key>NSCameraUsageDescription</key>
-            <string>\(escapedDisplayName) cần quyền truy cập Camera cho cuộc gọi video hoặc gửi hình ảnh trực tiếp.</string>
+            <string>\(escapedDisplayName) needs Camera access for video calls or sending photos.</string>
             <key>NSMicrophoneUsageDescription</key>
-            <string>\(escapedDisplayName) cần quyền truy cập Micro cho cuộc gọi thoại và tin nhắn âm thanh.</string>
+            <string>\(escapedDisplayName) needs Microphone access for voice calls and voice messages.</string>
             <key>NSAppTransportSecurity</key>
             <dict>
                 <key>NSAllowsArbitraryLoads</key>
@@ -150,7 +155,18 @@ enum DedicatedAppBuilder {
         """
         try infoPlist.write(to: contentsURL.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
 
+        // Localization bundles
+        let enLproj = resourcesURL.appendingPathComponent("en.lproj")
+        let viLproj = resourcesURL.appendingPathComponent("vi.lproj")
+        try? FileManager.default.createDirectory(at: enLproj, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: viLproj, withIntermediateDirectories: true)
+        let enStrings = "\"CFBundleDisplayName\" = \"\(escapedDisplayName)\";\n"
+        let viStrings = "\"CFBundleDisplayName\" = \"\(escapedDisplayName)\";\n"
+        try? enStrings.write(to: enLproj.appendingPathComponent("InfoPlist.strings"), atomically: true, encoding: .utf8)
+        try? viStrings.write(to: viLproj.appendingPathComponent("InfoPlist.strings"), atomically: true, encoding: .utf8)
+
         // 5. Clear xattrs & Ad-hoc Codesign
+        _ = runProcess("/usr/bin/xattr", arguments: ["-d", "com.apple.FinderInfo", stageAppURL.path])
         _ = runProcess("/usr/bin/xattr", arguments: ["-cr", stageAppURL.path])
         let signResult = runProcess("/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", stageAppURL.path])
         if signResult.exitCode != 0 {
@@ -162,7 +178,9 @@ enum DedicatedAppBuilder {
             try FileManager.default.removeItem(at: finalAppURL)
         }
         try FileManager.default.copyItem(at: stageAppURL, to: finalAppURL)
+        _ = runProcess("/usr/bin/xattr", arguments: ["-d", "com.apple.FinderInfo", finalAppURL.path])
         _ = runProcess("/usr/bin/xattr", arguments: ["-cr", finalAppURL.path])
+        _ = runProcess("/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", finalAppURL.path])
 
         return finalAppURL
     }

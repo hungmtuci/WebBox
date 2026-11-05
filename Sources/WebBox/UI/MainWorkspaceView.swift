@@ -141,7 +141,7 @@ struct MainWorkspaceView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
 
-                            Text("Bấm vào thông báo này để hiện tệp trên Finder")
+                            Text(L10n.revealInFinderBannerHint)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -149,7 +149,7 @@ struct MainWorkspaceView: View {
 
                         HStack(spacing: 4) {
                             Image(systemName: "folder.fill")
-                            Text("Hiện trên Finder")
+                            Text(L10n.revealInFinder)
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
@@ -163,7 +163,7 @@ struct MainWorkspaceView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Bấm để mở Finder và bôi đậm tệp vừa tải xuống")
+                .help(L10n.toastRevealTooltip)
 
                 Button {
                     store.dismissToast()
@@ -173,7 +173,7 @@ struct MainWorkspaceView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Đóng thông báo")
+                .help(L10n.toastDismiss)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -236,7 +236,7 @@ struct MainWorkspaceView: View {
     private var sidebarSectionHeader: some View {
         HStack(spacing: 6) {
             let currentSpace = store.spaces.first { $0.id == store.selectedSpaceID }
-            Text(currentSpace?.name ?? "Tài khoản")
+            Text(currentSpace?.name ?? L10n.accounts)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -255,7 +255,7 @@ struct MainWorkspaceView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Thu gọn menu bên trái chỉ hiện biểu tượng Icon (⌘⌥S)")
+            .help(L10n.sidebarCollapseTooltip)
         }
         .textCase(nil)
     }
@@ -270,7 +270,7 @@ struct MainWorkspaceView: View {
                 }
             } label: {
                 HStack {
-                    Label("Tất cả (\(store.instances.count))", systemImage: "tray.full")
+                    Label(L10n.allCount(store.instances.count), systemImage: "tray.full")
                     if store.selectedSpaceID == nil {
                         Image(systemName: "checkmark")
                     }
@@ -301,7 +301,7 @@ struct MainWorkspaceView: View {
             Button {
                 store.isGlobalSettingsPresented = true
             } label: {
-                Label("Quản lý Không gian...", systemImage: "folder.badge.gearshape")
+                Label(L10n.manageSpaces, systemImage: "folder.badge.gearshape")
             }
         } label: {
             Image(systemName: store.selectedSpaceID == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
@@ -310,7 +310,7 @@ struct MainWorkspaceView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Lọc theo Không gian làm việc (Spaces)")
+        .help(L10n.filterBySpace)
     }
 
     private func sidebarAccountRow(instance: WebAppInstance, shortcutIndex: Int?) -> some View {
@@ -394,14 +394,14 @@ struct MainWorkspaceView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "plus.circle.fill")
                             .symbolRenderingMode(.hierarchical)
-                        Text("Thêm App")
+                        Text(L10n.addApp)
                             .font(.callout.weight(.medium))
                             .lineLimit(1)
                     }
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.borderless)
-                .help("Mở kho ứng dụng hoặc thêm Website bất kỳ (⌘N)")
+                .help(L10n.addAppTooltip)
 
                 Spacer(minLength: 2)
 
@@ -414,7 +414,7 @@ struct MainWorkspaceView: View {
                         .font(.callout)
                 }
                 .buttonStyle(.borderless)
-                .help("Quản lý và xuất thành ứng dụng macOS độc lập (.app)")
+                .help(L10n.dedicatedAppTooltip)
 
                 Button {
                     store.isGlobalSettingsPresented = true
@@ -423,7 +423,7 @@ struct MainWorkspaceView: View {
                         .font(.callout)
                 }
                 .buttonStyle(.borderless)
-                .help("Cài đặt chung WebBox (⌘,)")
+                .help(L10n.globalSettingsTooltip)
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
@@ -450,7 +450,7 @@ struct MainWorkspaceView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .help("Mở rộng lại thanh bên đầy đủ (⌘⌥S)")
+                .help(L10n.sidebarExpandTooltip)
 
                 if !store.spaces.isEmpty {
                     spaceFilterMenu(iconOnly: false)
@@ -488,7 +488,7 @@ struct MainWorkspaceView: View {
                         .frame(width: 36, height: 30)
                 }
                 .buttonStyle(.plain)
-                .help("Thêm ứng dụng / Tài khoản mới (⌘N)")
+                .help(L10n.newAppAccountTooltip)
 
                 sidebarUpdateStatusControl
 
@@ -501,7 +501,7 @@ struct MainWorkspaceView: View {
                         .frame(width: 36, height: 26)
                 }
                 .buttonStyle(.plain)
-                .help("Quản lý Dedicated .app độc lập")
+                .help(L10n.newAppDedicatedTooltip)
 
                 Button {
                     store.isGlobalSettingsPresented = true
@@ -512,7 +512,7 @@ struct MainWorkspaceView: View {
                         .frame(width: 36, height: 26)
                 }
                 .buttonStyle(.plain)
-                .help("Cài đặt chung WebBox (⌘,)")
+                .help(L10n.globalSettingsTooltip)
             }
             .padding(.vertical, 10)
         }
@@ -594,13 +594,13 @@ struct MainWorkspaceView: View {
                     .foregroundStyle(.green)
             }
             .buttonStyle(.borderless)
-            .help("Đã có bản mới v\(info.version) trên GitHub — Bấm để cập nhật tự động")
+            .help(L10n.updateAvailableBanner(info.version))
 
         case .checking, .downloading, .installing:
             ProgressView()
                 .controlSize(.small)
                 .scaleEffect(0.75)
-                .help("Đang xử lý cập nhật từ GitHub...")
+                .help(L10n.updateProcessing)
 
         default:
             Button {
@@ -611,7 +611,7 @@ struct MainWorkspaceView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Kiểm tra bản cập nhật mới từ GitHub (⌘U)")
+            .help(L10n.checkForUpdatesTooltip)
         }
     }
 
@@ -664,8 +664,8 @@ struct MainWorkspaceView: View {
                 }
                 .help(
                     store.preferences.isSidebarCompact && store.preferences.isSidebarVisible
-                        ? "Mở rộng thanh bên đầy đủ (⌘⌥S)"
-                        : "Thu gọn thanh bên chỉ hiện biểu tượng Icon (⌘⌥S)"
+                        ? L10n.sidebarExpandTooltip
+                        : L10n.sidebarCollapseTooltip
                 )
             }
 
@@ -675,7 +675,7 @@ struct MainWorkspaceView: View {
                 Image(systemName: "chevron.left")
             }
             .disabled(!rtState.canGoBack)
-            .help("Quay lại (⌘[)")
+            .help(L10n.goBackTooltip)
 
             Button {
                 sessionManager.goForward(instanceID: active.id)
@@ -683,26 +683,26 @@ struct MainWorkspaceView: View {
                 Image(systemName: "chevron.right")
             }
             .disabled(!rtState.canGoForward)
-            .help("Tiến tới (⌘])")
+            .help(L10n.goForwardTooltip)
 
             Button {
                 sessionManager.reload(instanceID: active.id)
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .help("Tải lại trang (⌘R • ⌘⇧R tải lại bỏ qua cache)")
+            .help(L10n.reloadWithCacheTip)
 
             Button {
                 sessionManager.goHome(instanceID: active.id)
             } label: {
                 Image(systemName: "house")
             }
-            .help("Về trang chủ của ứng dụng")
+            .help(L10n.homeTooltip)
 
             // Quick Account Switcher right in the toolbar when Left Sidebar is completely hidden!
             if !store.isStandaloneMode && !store.preferences.isSidebarVisible {
                 Menu {
-                    Section("Chuyển nhanh tài khoản:") {
+                    Section(L10n.quickSwitchAccount) {
                         ForEach(Array(store.filteredInstances.enumerated()), id: \.element.id) { idx, item in
                             let itemState = sessionManager.state(for: item.id)
                             let unreadSuffix = itemState.unreadCount > 0
@@ -726,13 +726,13 @@ struct MainWorkspaceView: View {
                     Button {
                         store.setSidebarDisplayMode(.compactIcons)
                     } label: {
-                        Label("Hiện thanh bên thu gọn (Chỉ Icon) (⌘⌥S)", systemImage: "sidebar.squares.leading")
+                        Label(L10n.sidebarCollapseTooltip, systemImage: "sidebar.squares.leading")
                     }
 
                     Button {
                         store.setSidebarDisplayMode(.expanded)
                     } label: {
-                        Label("Hiện thanh bên đầy đủ (⌘\\)", systemImage: "sidebar.leading")
+                        Label(L10n.sidebarToggleFullTooltip, systemImage: "sidebar.leading")
                     }
                 } label: {
                     ZStack(alignment: .topTrailing) {
@@ -745,7 +745,7 @@ struct MainWorkspaceView: View {
                         }
                     }
                 }
-                .help("Chuyển nhanh tài khoản khi đang ẩn thanh bên")
+                .help(L10n.quickSwitchWhenHidden)
             }
         }
 
@@ -755,30 +755,30 @@ struct MainWorkspaceView: View {
                 Button {
                     updater.showUpdatePromptDialog = true
                 } label: {
-                    Label("Cập nhật v\(updateInfo.version)", systemImage: "arrow.down.circle.fill")
+                    Label(L10n.updateButton(updateInfo.version), systemImage: "arrow.down.circle.fill")
                 }
                 .tint(.green)
-                .help("Đã có phiên bản mới trên GitHub Releases — Bấm để tự động cập nhật")
+                .help(L10n.updateAvailableTooltip)
             }
 
             if !store.isStandaloneMode {
                 Button {
                     store.addAnotherAccount(basedOn: active)
                 } label: {
-                    Label("Thêm nick", systemImage: "person.badge.plus")
+                    Label(L10n.addAnotherAccount(of: active.name), systemImage: "person.badge.plus")
                 }
-                .help("Tạo ngay một tài khoản \(active.name) độc lập mới (⌘⇧N)")
+                .help(L10n.createAccountTooltip(active.name))
             }
 
             // Smart Link Routing Mode Menu
             Menu {
-                Section("Khi bấm đường link trong tin nhắn (\(active.displayTitle)):") {
+                Section(L10n.linkModeForAccount(active.displayTitle)) {
                     ForEach(LinkRoutingMode.allCases) { mode in
                         Button {
                             var updated = active
                             updated.linkRoutingMode = mode
                             store.updateInstance(updated)
-                            store.showToast("Chế độ mở link: \(mode.title)")
+                            store.showToast(L10n.linkModeCurrent(mode.title))
                         } label: {
                             HStack {
                                 Label(mode.title, systemImage: mode.symbolName)
@@ -793,7 +793,7 @@ struct MainWorkspaceView: View {
                 Divider()
 
                 Toggle(
-                    "Trình duyệt trong App dạng Chia đôi cạnh bên",
+                    L10n.inAppBrowserSplitLayout,
                     isOn: Binding(
                         get: { store.preferences.inAppBrowserLayout == .splitRight },
                         set: { isSplit in
@@ -806,7 +806,7 @@ struct MainWorkspaceView: View {
                 Label(effectiveLinkMode.shortTitle, systemImage: effectiveLinkMode.symbolName)
                     .labelStyle(.titleAndIcon)
             }
-            .help("Chọn cách mở khi bấm đường link trong tin nhắn: Hỏi mỗi lần, Mở trong App, hoặc Trình duyệt ngoài")
+            .help(L10n.linkModeHelp)
 
             // Built-in Browser Toggle
             Button {
@@ -826,18 +826,18 @@ struct MainWorkspaceView: View {
                     }
                 }
             }
-            .help("Mở / Ẩn khung Trình duyệt tích hợp ngay trong WebBox")
+            .help(L10n.toggleInAppBrowserTooltip)
 
             // Side-by-Side 2 Accounts Split Menu
             if !store.isStandaloneMode && store.instances.count > 1 {
                 Menu {
                     if store.secondarySplitInstanceID != nil {
-                        Button("Đóng chế độ xem song song 2 tài khoản") {
+                        Button(L10n.closeSplitScreen) {
                             store.secondarySplitInstanceID = nil
                         }
                         Divider()
                     }
-                    Section("Mở song song tài khoản thứ 2 bên cạnh:") {
+                    Section(L10n.openSecondAccountSideBySide) {
                         ForEach(store.instances.filter { $0.id != active.id }) { candidate in
                             Button {
                                 store.secondarySplitInstanceID = candidate.id
@@ -854,7 +854,7 @@ struct MainWorkspaceView: View {
                 } label: {
                     Image(systemName: store.secondarySplitInstanceID != nil ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                 }
-                .help("Chia đôi màn hình để dùng 2 tài khoản cùng lúc")
+                .help(L10n.splitScreenTooltip)
             }
 
             // Downloads Popover (Always accessible once downloads occur, or configure in Settings)
@@ -868,7 +868,7 @@ struct MainWorkspaceView: View {
                 .popover(isPresented: $store.isDownloadsPopoverShown) {
                     downloadsPopoverView
                 }
-                .help("Danh sách tệp tải xuống & Thư mục lưu")
+                .help(L10n.downloadsTooltip)
             }
 
             // Open Current URL in External Browser
@@ -881,7 +881,7 @@ struct MainWorkspaceView: View {
                 } label: {
                     Image(systemName: "safari")
                 }
-                .help("Mở trang hiện tại ra trình duyệt ngoài")
+                .help(L10n.openCurrentInExternalBrowserTooltip)
             }
 
             // Account Settings
@@ -890,7 +890,7 @@ struct MainWorkspaceView: View {
             } label: {
                 Image(systemName: "slider.horizontal.3")
             }
-            .help("Tuỳ chỉnh tài khoản, Icon, Chế độ mở Link & Xuất .app")
+            .help(L10n.accountSettingsTooltip)
         }
     }
 
@@ -901,7 +901,7 @@ struct MainWorkspaceView: View {
         Button {
             store.addAnotherAccount(basedOn: instance)
         } label: {
-            Label("Thêm tài khoản \(instance.name) mới (Độc lập)", systemImage: "person.crop.circle.badge.plus")
+            Label(L10n.ctxAddAnotherAccount(instance.name), systemImage: "person.crop.circle.badge.plus")
         }
 
         Divider()
@@ -909,7 +909,7 @@ struct MainWorkspaceView: View {
         Button {
             sessionManager.openDetachedWindow(for: instance)
         } label: {
-            Label("Tách ra cửa sổ riêng (Dedicated Window)", systemImage: "macwindow.on.rectangle")
+            Label(L10n.ctxDetachWindow, systemImage: "macwindow.on.rectangle")
         }
 
         if store.activeInstanceID != instance.id {
@@ -922,8 +922,8 @@ struct MainWorkspaceView: View {
             } label: {
                 Label(
                     store.secondarySplitInstanceID == instance.id
-                        ? "Tắt xem song song tài khoản này"
-                        : "Xem song song cạnh tài khoản hiện tại",
+                        ? L10n.ctxCloseSideBySide
+                        : L10n.ctxOpenSideBySide,
                     systemImage: "rectangle.split.2x1"
                 )
             }
@@ -932,7 +932,7 @@ struct MainWorkspaceView: View {
         Button {
             _ = try? store.exportDedicatedDesktopApp(for: instance.id, launchAfterExport: false, pinToDock: false)
         } label: {
-            Label("Xuất thành ứng dụng .app độc lập", systemImage: "app.badge.checkmark")
+            Label(L10n.ctxExportDedicatedApp, systemImage: "app.badge.checkmark")
         }
 
         Divider()
@@ -940,7 +940,7 @@ struct MainWorkspaceView: View {
         Button {
             sessionManager.reload(instanceID: instance.id)
         } label: {
-            Label("Tải lại trang (⌘R)", systemImage: "arrow.clockwise")
+            Label(L10n.ctxReloadPage, systemImage: "arrow.clockwise")
         }
 
         Button {
@@ -951,31 +951,31 @@ struct MainWorkspaceView: View {
                     siteURL: instance.baseURL
                 ) {
                     store.updateIconSilently(instanceID: instance.id, pngData: png)
-                    store.showToast("Đã cập nhật Icon cho \(instance.name)")
+                    store.showToast(L10n.iconUpdatedToast(instance.name))
                 }
             }
         } label: {
-            Label("Tải lại Icon gốc độ phân giải cao", systemImage: "sparkles")
+            Label(L10n.ctxRefetchIcon, systemImage: "sparkles")
         }
 
         if rtState.isHibernated {
             Button {
                 sessionManager.wakeInstance(instance)
             } label: {
-                Label("Đánh thức tài khoản", systemImage: "bolt.fill")
+                Label(L10n.ctxWakeAccount, systemImage: "bolt.fill")
             }
         } else {
             Button {
                 sessionManager.hibernateInstance(instance.id)
             } label: {
-                Label("Ngủ đông để giải phóng RAM", systemImage: "moon.zzz.fill")
+                Label(L10n.ctxHibernateAccount, systemImage: "moon.zzz.fill")
             }
         }
 
         Button {
             store.editingInstance = instance
         } label: {
-            Label("Tuỳ chỉnh tài khoản & Chế độ mở Link...", systemImage: "slider.horizontal.3")
+            Label(L10n.ctxCustomizeAccount, systemImage: "slider.horizontal.3")
         }
 
         Divider()
@@ -983,7 +983,7 @@ struct MainWorkspaceView: View {
         Button(role: .destructive) {
             store.removeInstance(instance.id, clearWebsiteData: true)
         } label: {
-            Label("Xoá tài khoản này", systemImage: "trash")
+            Label(L10n.ctxDeleteAccount, systemImage: "trash")
         }
     }
 
@@ -1014,7 +1014,7 @@ struct MainWorkspaceView: View {
                                     .font(.caption)
                             }
                             .buttonStyle(.borderless)
-                            .help("Tải lại khung này")
+                            .help(L10n.reloadPaneTooltip)
 
                             Button {
                                 store.secondarySplitInstanceID = nil
@@ -1023,7 +1023,7 @@ struct MainWorkspaceView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.plain)
-                            .help("Đóng khung xem song song")
+                            .help(L10n.closeSplitScreenTooltip)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -1051,7 +1051,7 @@ struct MainWorkspaceView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Tìm nội dung trong trang hiện tại...", text: $store.findQuery)
+            TextField(L10n.findPlaceholder, text: $store.findQuery)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 280)
                 .onSubmit {
@@ -1074,7 +1074,7 @@ struct MainWorkspaceView: View {
 
             Spacer()
 
-            Button("Xong") {
+            Button(L10n.done) {
                 store.isFindBarVisible = false
             }
             .controlSize(.small)
@@ -1090,10 +1090,10 @@ struct MainWorkspaceView: View {
     private var downloadsPopoverView: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Tệp tải xuống")
+                Text(L10n.downloadsPopoverTitle)
                     .font(.headline)
                 Spacer()
-                Button("Xoá danh sách") {
+                Button(L10n.clearList) {
                     sessionManager.downloads.removeAll()
                 }
                 .font(.caption)
@@ -1119,7 +1119,7 @@ struct MainWorkspaceView: View {
                                     ProgressView(value: frac)
                                         .controlSize(.mini)
                                 } else {
-                                    Text(item.state == .completed ? "\(item.sourceInstanceTitle) • Bấm để hiện trên Finder" : item.sourceInstanceTitle)
+                                    Text(item.state == .completed ? L10n.downloadItemFinderHint(item.sourceInstanceTitle) : item.sourceInstanceTitle)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -1128,7 +1128,7 @@ struct MainWorkspaceView: View {
                             Spacer(minLength: 4)
 
                             if let url = item.destinationURL, item.state == .completed {
-                                Button("Mở") {
+                                Button(L10n.open) {
                                     NSWorkspace.shared.open(url)
                                 }
                                 .controlSize(.mini)
@@ -1140,7 +1140,7 @@ struct MainWorkspaceView: View {
                                     Image(systemName: "magnifyingglass")
                                 }
                                 .controlSize(.mini)
-                                .help("Hiện tệp này trên Finder")
+                                .help(L10n.revealInFinderItemHint)
                             }
                         }
                         .padding(.horizontal, 8)
@@ -1176,12 +1176,12 @@ struct MainWorkspaceView: View {
 
                 Spacer()
 
-                Button("Mở thư mục") {
+                Button(L10n.openFolder) {
                     store.openDownloadsDirectory()
                 }
                 .controlSize(.mini)
 
-                Button("Đổi nơi lưu...") {
+                Button(L10n.downloadsChangeFolder) {
                     store.chooseDownloadsDirectory()
                 }
                 .controlSize(.mini)
@@ -1195,14 +1195,14 @@ struct MainWorkspaceView: View {
 
     private var emptyWorkspaceWelcomeView: some View {
         ContentUnavailableView {
-            Label("Chào mừng đến với WebBox", systemImage: "macwindow.on.rectangle")
+            Label(L10n.welcomeTitle, systemImage: "macwindow.on.rectangle")
         } description: {
-            Text("Biến mọi trang web thành ứng dụng macOS độc lập và đăng nhập nhiều tài khoản Zalo, Facebook, Messenger, Gmail hoàn toàn tách biệt.")
+            Text(L10n.welcomeDescription)
         } actions: {
             Button {
                 store.isCatalogPresented = true
             } label: {
-                Label("Thêm Ứng Dụng hoặc Website Mới", systemImage: "plus")
+                Label(L10n.welcomeAddAppButton, systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -1233,7 +1233,7 @@ struct GitHubUpdateOverlayCard: View {
                         .foregroundStyle(.green)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Cập nhật WebBox từ GitHub")
+                        Text(L10n.updateDialogTitle)
                             .font(.headline)
                         Text("github.com/\(UpdateCheckerService.githubOwner)/\(UpdateCheckerService.githubRepo)")
                             .font(.caption)
@@ -1260,7 +1260,7 @@ struct GitHubUpdateOverlayCard: View {
                 case .available(let info):
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
-                            Text("Hiện tại: v\(updater.currentVersion)")
+                            Text(L10n.updateDialogCurrent(updater.currentVersion))
                                 .font(.caption.weight(.medium))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
@@ -1270,7 +1270,7 @@ struct GitHubUpdateOverlayCard: View {
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(.secondary)
 
-                            Text("Bản mới: v\(info.version)")
+                            Text(L10n.updateDialogNew(info.version))
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(.green)
                                 .padding(.horizontal, 10)
@@ -1292,24 +1292,24 @@ struct GitHubUpdateOverlayCard: View {
                                     .fill(Color(nsColor: .controlBackgroundColor))
                             )
                         } else {
-                            Text("Bản phát hành mới đã sẵn sàng trên GitHub Releases. WebBox sẽ tự động tải về, thay thế ứng dụng và khởi động lại ngay.")
+                            Text(L10n.updateDialogDesc)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
                     HStack {
-                        Button("Xem trên GitHub") {
+                        Button(L10n.updateDialogViewOnGitHub) {
                             NSWorkspace.shared.open(info.releasePageURL)
                         }
                         Spacer()
-                        Button("Để sau") {
+                        Button(L10n.updateDialogLater) {
                             updater.showUpdatePromptDialog = false
                         }
                         Button {
                             updater.installAvailableUpdate()
                         } label: {
-                            Label("Cập nhật tự động v\(info.version)", systemImage: "bolt.fill")
+                            Label(L10n.updateDialogAutoUpdate(info.version), systemImage: "bolt.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
@@ -1319,7 +1319,7 @@ struct GitHubUpdateOverlayCard: View {
                 case .downloading(let ver, let pct):
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("Đang tải WebBox v\(ver)...")
+                            Text(L10n.updateDialogDownloading(ver))
                                 .font(.callout.weight(.semibold))
                             Spacer()
                             Text("\(Int(pct * 100))%")
@@ -1327,7 +1327,7 @@ struct GitHubUpdateOverlayCard: View {
                         }
                         ProgressView(value: pct)
                             .progressViewStyle(.linear)
-                        Text("Đang tải trực tiếp gói cài đặt từ GitHub Releases...")
+                        Text(L10n.updateDialogDownloadingDesc)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1336,9 +1336,9 @@ struct GitHubUpdateOverlayCard: View {
                     HStack(spacing: 12) {
                         ProgressView()
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Đang cài đặt WebBox v\(ver)...")
+                            Text(L10n.updateDialogInstalling(ver))
                                 .font(.callout.weight(.semibold))
-                            Text("Ứng dụng sẽ tự động mở lại ngay sau khi hoàn tất.")
+                            Text(L10n.updateDialogInstallingDesc)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1346,11 +1346,11 @@ struct GitHubUpdateOverlayCard: View {
                     .padding(.vertical, 8)
 
                 default:
-                    Text("Phiên bản hiện tại: v\(updater.currentVersion)")
+                    Text(L10n.updateDialogCurrent(updater.currentVersion))
                         .font(.callout)
                     HStack {
                         Spacer()
-                        Button("Đóng") {
+                        Button(L10n.close) {
                             updater.showUpdatePromptDialog = false
                         }
                     }

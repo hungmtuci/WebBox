@@ -80,19 +80,21 @@ final class WebBoxWKWebView: WKWebView {
         for item in menu.items {
             let id = item.identifier?.rawValue ?? ""
             if id.contains("DownloadLinkedFile") {
-                item.title = "Tải về tệp được liên kết"
+                item.title = L10n.ctxDownloadLinkedFile
                 item.image = NSImage(systemSymbolName: "arrow.down.doc", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleDownloadLinkedFile(_:))
                 item.representedObject = makePayload(nil)
                 item.isEnabled = true
             } else if id.contains("DownloadMedia") || id.contains("DownloadVideo") || id.contains("DownloadAudio") {
+                item.title = L10n.ctxDownloadMedia
                 item.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleDownloadMedia(_:))
                 item.representedObject = makePayload(nil)
                 item.isEnabled = true
             } else if id.contains("OpenMediaInNewWindow") || id.contains("OpenVideoInNewWindow") {
+                item.title = L10n.ctxOpenMediaInNewWindow
                 item.image = NSImage(systemSymbolName: "play.rectangle.on.rectangle", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleOpenMediaInNewWindow(_:))
@@ -116,7 +118,7 @@ final class WebBoxWKWebView: WKWebView {
             var insertIndex = 0
 
             let openInAppItem = NSMenuItem(
-                title: "Mở liên kết trong Trình duyệt WebBox",
+                title: L10n.ctxOpenLinkInApp,
                 action: #selector(handleOpenLinkInApp(_:)),
                 keyEquivalent: ""
             )
@@ -128,7 +130,7 @@ final class WebBoxWKWebView: WKWebView {
 
             let defaultBrowserName = LinkRouter.defaultSystemBrowserName()
             let openExternalItem = NSMenuItem(
-                title: "Mở bằng Trình duyệt ngoài (\(defaultBrowserName))",
+                title: String(format: L10n.ctxOpenLinkExternalDefault("%@"), defaultBrowserName),
                 action: #selector(handleOpenLinkExternalDefault(_:)),
                 keyEquivalent: ""
             )
@@ -140,7 +142,7 @@ final class WebBoxWKWebView: WKWebView {
 
             let browsers = LinkRouter.installedExternalBrowsers()
             if browsers.count > 1 {
-                let pickSubmenuItem = NSMenuItem(title: "Mở liên kết bằng trình duyệt khác", action: nil, keyEquivalent: "")
+                let pickSubmenuItem = NSMenuItem(title: L10n.ctxOpenLinkAnotherBrowser, action: nil, keyEquivalent: "")
                 pickSubmenuItem.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
                 let sub = NSMenu()
                 for browser in browsers {
@@ -160,7 +162,7 @@ final class WebBoxWKWebView: WKWebView {
             }
 
             let copyCleanItem = NSMenuItem(
-                title: "Sao chép liên kết sạch",
+                title: L10n.ctxCopyCleanLink,
                 action: #selector(handleCopyCleanLink(_:)),
                 keyEquivalent: ""
             )
@@ -173,7 +175,7 @@ final class WebBoxWKWebView: WKWebView {
             let alreadyHasDownloadLink = menu.items.contains { ($0.identifier?.rawValue ?? "").contains("DownloadLinkedFile") }
             if !alreadyHasDownloadLink {
                 let dlLinkItem = NSMenuItem(
-                    title: "Tải về tệp được liên kết",
+                    title: L10n.ctxDownloadLinkedFile,
                     action: #selector(handleDownloadLinkedFile(_:)),
                     keyEquivalent: ""
                 )
@@ -200,14 +202,14 @@ final class WebBoxWKWebView: WKWebView {
         for (idx, item) in menu.items.enumerated() {
             let id = item.identifier?.rawValue ?? ""
             if id.contains("OpenImageInNewWindow") {
-                item.title = "Mở hình ảnh trong cửa sổ mới"
+                item.title = L10n.ctxOpenImageInNewWindow
                 item.image = NSImage(systemSymbolName: "macwindow.badge.plus", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleOpenImageInNewWindow(_:))
                 item.representedObject = payloadFactory(nil)
                 item.isEnabled = true
             } else if id.contains("DownloadImage") {
-                item.title = "Tải về hình ảnh"
+                item.title = L10n.ctxDownloadImage
                 item.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleDownloadImage(_:))
@@ -215,7 +217,7 @@ final class WebBoxWKWebView: WKWebView {
                 item.isEnabled = true
                 downloadIndex = idx
             } else if id.contains("CopyImage") {
-                item.title = "Sao chép hình ảnh"
+                item.title = L10n.ctxCopyImage
                 item.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleCopyImage(_:))
@@ -223,7 +225,7 @@ final class WebBoxWKWebView: WKWebView {
                 item.isEnabled = true
                 copyImageIndex = idx
             } else if id.contains("CopySubject") {
-                item.title = "Sao chép chủ thể"
+                item.title = L10n.ctxCopySubject
                 item.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleCopySubject(_:))
@@ -232,7 +234,7 @@ final class WebBoxWKWebView: WKWebView {
                 foundCopySubject = true
             } else if id.contains("ShareMenu") {
                 item.submenu = nil
-                item.title = "Chia sẻ..."
+                item.title = L10n.ctxShare
                 item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: nil)
                 item.target = self
                 item.action = #selector(handleShareImage(_:))
@@ -245,7 +247,7 @@ final class WebBoxWKWebView: WKWebView {
         // Insert "Sao chép chủ thể" right below "Sao chép hình ảnh" if WebKit omitted it (e.g. on blob:/WebP)
         if !foundCopySubject, let cIdx = copyImageIndex {
             let subjectItem = NSMenuItem(
-                title: "Sao chép chủ thể",
+                title: L10n.ctxCopySubject,
                 action: #selector(handleCopySubject(_:)),
                 keyEquivalent: ""
             )
@@ -258,7 +260,7 @@ final class WebBoxWKWebView: WKWebView {
         // Insert "Lưu hình ảnh thành..." right below "Tải về hình ảnh"
         if let dIdx = downloadIndex {
             let saveAsItem = NSMenuItem(
-                title: "Lưu hình ảnh thành...",
+                title: L10n.ctxSaveImageAs,
                 action: #selector(handleSaveImageAs(_:)),
                 keyEquivalent: ""
             )
@@ -271,7 +273,7 @@ final class WebBoxWKWebView: WKWebView {
         // Insert "Chia sẻ..." if WebKit omitted it
         if !foundShare {
             let shareItem = NSMenuItem(
-                title: "Chia sẻ...",
+                title: L10n.ctxShare,
                 action: #selector(handleShareImage(_:)),
                 keyEquivalent: ""
             )
@@ -297,12 +299,12 @@ final class WebBoxWKWebView: WKWebView {
         var idx = min(startIndex, menu.items.count)
 
         let entries: [(String, String, Selector)] = [
-            ("Mở hình ảnh trong cửa sổ mới", "macwindow.badge.plus", #selector(handleOpenImageInNewWindow(_:))),
-            ("Tải về hình ảnh", "arrow.down.circle", #selector(handleDownloadImage(_:))),
-            ("Lưu hình ảnh thành...", "folder.badge.plus", #selector(handleSaveImageAs(_:))),
-            ("Sao chép hình ảnh", "doc.on.doc", #selector(handleCopyImage(_:))),
-            ("Sao chép chủ thể", "sparkles", #selector(handleCopySubject(_:))),
-            ("Chia sẻ...", "square.and.arrow.up", #selector(handleShareImage(_:)))
+            (L10n.ctxOpenImageInNewWindow, "macwindow.badge.plus", #selector(handleOpenImageInNewWindow(_:))),
+            (L10n.ctxDownloadImage, "arrow.down.circle", #selector(handleDownloadImage(_:))),
+            (L10n.ctxSaveImageAs, "folder.badge.plus", #selector(handleSaveImageAs(_:))),
+            (L10n.ctxCopyImage, "doc.on.doc", #selector(handleCopyImage(_:))),
+            (L10n.ctxCopySubject, "sparkles", #selector(handleCopySubject(_:))),
+            (L10n.ctxShare, "square.and.arrow.up", #selector(handleShareImage(_:)))
         ]
 
         for (title, symbol, action) in entries {
@@ -725,8 +727,8 @@ final class WebSessionManager: NSObject, ObservableObject {
         guard !WorkspaceStore.shared.preferences.globalDoNotDisturb else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Đã tải xong tệp"
-        content.body = "\(filename) — Bấm vào thông báo để hiện trên Finder"
+        content.title = L10n.s("Đã tải xong tệp", "Download Complete")
+        content.body = L10n.downloadCompletedNotificationBody(filename)
         content.sound = .default
         content.userInfo = ["revealFilePath": fileURL.path]
 
@@ -1922,8 +1924,8 @@ private final class DownloadTracker: NSObject, WKDownloadDelegate {
 
         if store.preferences.askWhereToSaveEachDownload {
             let panel = NSSavePanel()
-            panel.title = "Lưu tệp tải xuống"
-            panel.prompt = "Lưu"
+            panel.title = L10n.saveDownloadedFile
+            panel.prompt = L10n.save
             panel.canCreateDirectories = true
             panel.directoryURL = downloadsDir
             panel.nameFieldStringValue = suggestedFilename

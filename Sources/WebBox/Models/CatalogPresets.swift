@@ -1,14 +1,26 @@
 import Foundation
 
 enum CatalogCategory: String, CaseIterable, Identifiable {
-    case all = "Tất cả"
-    case messaging = "Nhắn tin & Chat"
-    case social = "Mạng xã hội"
-    case productivity = "Email & Công việc"
-    case ai = "Trí tuệ nhân tạo (AI)"
-    case business = "Bán hàng & Quản trị"
+    case all = "all"
+    case messaging = "messaging"
+    case social = "social"
+    case productivity = "productivity"
+    case ai = "ai"
+    case business = "business"
 
     var id: String { rawValue }
+
+    @MainActor
+    var displayName: String {
+        switch self {
+        case .all: return L10n.all
+        case .messaging: return L10n.s("Nhắn tin & Chat", "Messaging & Chat")
+        case .social: return L10n.s("Mạng xã hội", "Social Media")
+        case .productivity: return L10n.s("Email & Công việc", "Email & Productivity")
+        case .ai: return L10n.s("Trí tuệ nhân tạo (AI)", "Artificial Intelligence (AI)")
+        case .business: return L10n.s("Bán hàng & Quản trị", "Business & Commerce")
+        }
+    }
 
     var symbolName: String {
         switch self {

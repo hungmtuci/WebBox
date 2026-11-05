@@ -359,9 +359,9 @@ struct GlobalSettingsSheetView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Cài Đặt Chung WebBox")
+                    Text(L10n.globalSettingsTitle)
                         .font(.headline)
-                    Text("Quản lý cập nhật GitHub, chế độ mở Link mặc định, giao diện macOS và Không gian")
+                    Text(L10n.globalSettingsSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -374,8 +374,8 @@ struct GlobalSettingsSheetView: View {
             Divider()
 
             Form {
-                Section("Cập nhật qua GitHub (hungmtuci/WebBox)") {
-                    LabeledContent("Phiên bản đang chạy:") {
+                Section(L10n.sectionGitHubUpdate) {
+                    LabeledContent(L10n.currentRunningVersion) {
                         HStack(spacing: 8) {
                             Text("v\(updater.currentVersion)")
                                 .font(.callout.monospacedDigit().weight(.semibold))
@@ -384,7 +384,7 @@ struct GlobalSettingsSheetView: View {
                                 Button {
                                     updater.installAvailableUpdate()
                                 } label: {
-                                    Label("Cập nhật v\(info.version)", systemImage: "arrow.down.circle.fill")
+                                    Label(L10n.s("Cập nhật v\(info.version)", "Update to v\(info.version)"), systemImage: "arrow.down.circle.fill")
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(.green)
@@ -395,7 +395,7 @@ struct GlobalSettingsSheetView: View {
                                 updater.checkForUpdatesManually()
                             } label: {
                                 Label(
-                                    updater.isBusy ? "Đang kiểm tra..." : "Kiểm tra cập nhật",
+                                    updater.isBusy ? L10n.checkingUpdate : L10n.checkForUpdates,
                                     systemImage: "arrow.triangle.2.circlepath"
                                 )
                             }
@@ -408,7 +408,7 @@ struct GlobalSettingsSheetView: View {
                                 Image(systemName: "arrow.up.right.square")
                             }
                             .controlSize(.small)
-                            .help("Mở kho mã nguồn trên GitHub")
+                            .help(L10n.openGitHubRepoTooltip)
                         }
                     }
 
@@ -416,55 +416,65 @@ struct GlobalSettingsSheetView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Toggle("Tự động kiểm tra phiên bản mới từ GitHub khi khởi động", isOn: $updater.autoCheckOnLaunch)
+                    Toggle(L10n.autoCheckUpdatesOnLaunch, isOn: $updater.autoCheckOnLaunch)
                 }
 
                 Section {
-                    Picker("Hành vi mặc định khi bấm link:", selection: $store.preferences.defaultLinkRoutingMode) {
+                    Picker(L10n.defaultLinkBehaviorLabel, selection: $store.preferences.defaultLinkRoutingMode) {
                         ForEach(LinkRoutingMode.globalSelectableCases) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
 
-                    Picker("Bố cục trình duyệt tích hợp:", selection: $store.preferences.inAppBrowserLayout) {
+                    Picker(L10n.inAppBrowserLayoutLabel, selection: $store.preferences.inAppBrowserLayout) {
                         ForEach(InAppBrowserLayoutMode.allCases) { layout in
                             Text(layout.title).tag(layout)
                         }
                     }
                 } header: {
-                    Text("Đường link trong tin nhắn")
+                    Text(L10n.linkModeHeader)
                 } footer: {
-                    Text("Mẹo: Giữ ⌘+Click để mở nhanh trong App hoặc ⌥+Click để mở thẳng bằng trình duyệt ngoài.")
+                    Text(L10n.linkModifierTip)
                 }
 
-                Section("Giao diện, Biểu tượng & Hệ thống") {
-                    Picker("Chế độ thanh bên trái:", selection: $store.preferences.sidebarDisplayMode) {
+                Section(L10n.sectionAppearance) {
+                    Picker(L10n.interfaceLanguageLabel, selection: $store.preferences.appLanguage) {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Text(lang.displayName).tag(lang)
+                        }
+                    }
+                    .onChange(of: store.preferences.appLanguage) { _, _ in
+                        store.save()
+                        WebBoxAppDelegate.shared.installMainMenu()
+                    }
+
+                    Picker(L10n.sidebarModeLabel, selection: $store.preferences.sidebarDisplayMode) {
                         ForEach(SidebarDisplayMode.allCases) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
 
                     if !store.preferences.isSidebarCompact {
-                        Toggle("Hiện nhãn tên tài khoản phụ dưới tên ứng dụng ở thanh bên", isOn: $store.preferences.showAccountLabelsInSidebar)
+                        Toggle(L10n.showAccountSubtitleInSidebar, isOn: $store.preferences.showAccountLabelsInSidebar)
                     }
-                    Toggle("Chế độ Không làm phiền (Tạm tắt toàn bộ thông báo đẩy)", isOn: $store.preferences.globalDoNotDisturb)
-                    Picker("Tự động ngủ đông nền (Giải phóng RAM):", selection: $store.preferences.autoHibernateMinutes) {
-                        Text("Tắt (Luôn giữ hoạt động)").tag(0)
-                        Text("Sau 15 phút không dùng").tag(15)
-                        Text("Sau 30 phút không dùng").tag(30)
-                        Text("Sau 1 giờ không dùng").tag(60)
-                        Text("Sau 2 giờ không dùng").tag(120)
+                    Toggle(L10n.doNotDisturbToggle, isOn: $store.preferences.globalDoNotDisturb)
+                    Picker(L10n.autoHibernateLabel, selection: $store.preferences.autoHibernateMinutes) {
+                        Text(L10n.autoHibernateOff).tag(0)
+                        Text(L10n.autoHibernate15m).tag(15)
+                        Text(L10n.autoHibernate30m).tag(30)
+                        Text(L10n.autoHibernate60m).tag(60)
+                        Text(L10n.autoHibernate120m).tag(120)
                     }
                     .onChange(of: store.preferences.autoHibernateMinutes) { _, _ in
                         store.save()
                     }
-                    Toggle("Bật công cụ Web Inspector (Inspect Element khi chuột phải)", isOn: $store.preferences.enableDeveloperExtras)
+                    Toggle(L10n.enableInspectorToggle, isOn: $store.preferences.enableDeveloperExtras)
                         .onChange(of: store.preferences.enableDeveloperExtras) { _, newValue in
                             WebSessionManager.shared.syncDeveloperExtrasPreference(newValue)
                             store.save()
                         }
 
-                    LabeledContent("Biểu tượng ứng dụng:") {
+                    LabeledContent(L10n.appIconsLabel) {
                         Button {
                             for inst in store.instances {
                                 Task { @MainActor in
@@ -477,16 +487,16 @@ struct GlobalSettingsSheetView: View {
                                     }
                                 }
                             }
-                            store.showToast("Đang đồng bộ lại toàn bộ Icon độ phân giải cao...")
+                            store.showToast(L10n.s("Đang đồng bộ lại toàn bộ Icon độ phân giải cao...", "Syncing high-resolution icons for all apps..."))
                         } label: {
-                            Label("Đồng bộ lại Icon chuẩn cho tất cả App", systemImage: "sparkles")
+                            Label(L10n.syncAllIconsButton, systemImage: "sparkles")
                         }
                         .controlSize(.small)
                     }
                 }
 
                 Section {
-                    LabeledContent("Thư mục lưu tệp tải về:") {
+                    LabeledContent(L10n.downloadsDirectoryLabel) {
                         HStack(spacing: 8) {
                             Text(store.preferences.downloadsDirectory)
                                 .font(.caption.monospaced())
@@ -494,18 +504,18 @@ struct GlobalSettingsSheetView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
 
-                            Button("Mở") {
+                            Button(L10n.open) {
                                 store.openDownloadsDirectory()
                             }
                             .controlSize(.small)
 
-                            Button("Thay đổi...") {
+                            Button(L10n.change) {
                                 store.chooseDownloadsDirectory()
                             }
                             .controlSize(.small)
 
                             if store.preferences.downloadsDirectory != GlobalWorkspacePreferences.defaultDownloadsDirectoryPath {
-                                Button("Mặc định") {
+                                Button(L10n.defaultText) {
                                     store.preferences.downloadsDirectory = GlobalWorkspacePreferences.defaultDownloadsDirectoryPath
                                     store.save()
                                 }
@@ -514,15 +524,15 @@ struct GlobalSettingsSheetView: View {
                         }
                     }
 
-                    Toggle("Hỏi vị trí lưu mỗi khi tải tệp xuống", isOn: $store.preferences.askWhereToSaveEachDownload)
+                    Toggle(L10n.askWhereToSaveEachDownloadToggle, isOn: $store.preferences.askWhereToSaveEachDownload)
                 } header: {
-                    Text("Tệp tải xuống (Downloads)")
+                    Text(L10n.sectionDownloads)
                 } footer: {
-                    Text("Khi tải tệp hoàn tất, bấm trực tiếp vào thông báo ở cuối cửa sổ để mở nhanh và bôi đậm tệp trên Finder.")
+                    Text(L10n.downloadsSectionFooter)
                 }
 
-                Section("Thư mục lưu Dedicated Desktop Apps (.app)") {
-                    LabeledContent("Thư mục cài đặt:") {
+                Section(L10n.sectionDedicatedAppsDir) {
+                    LabeledContent(L10n.installDirectoryLabel) {
                         HStack(spacing: 8) {
                             Text(store.preferences.dedicatedAppsInstallDirectory)
                                 .font(.caption.monospaced())
@@ -530,15 +540,16 @@ struct GlobalSettingsSheetView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
 
-                            Button("Mở") {
+                            Button(L10n.open) {
                                 let url = URL(fileURLWithPath: store.preferences.dedicatedAppsInstallDirectory)
                                 try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
                                 NSWorkspace.shared.open(url)
                             }
                             .controlSize(.small)
 
-                            Button("Thay đổi...") {
+                            Button(L10n.change) {
                                 let panel = NSOpenPanel()
+                                panel.prompt = L10n.chooseFolderPrompt
                                 panel.canChooseFiles = false
                                 panel.canChooseDirectories = true
                                 panel.canCreateDirectories = true
