@@ -290,7 +290,9 @@ final class AppIconFetcher: ObservableObject {
             guard let href = extractHrefAttribute(fromTag: tag), !href.isEmpty else {
                 continue
             }
-            guard let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL else {
+            guard let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL,
+                  let scheme = resolved.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
                 continue
             }
             if lower.contains("apple-touch-icon") {
@@ -316,6 +318,10 @@ final class AppIconFetcher: ObservableObject {
     // MARK: - Image Download & High-DPI PNG Normalization
 
     func downloadAndNormalizeIcon(from url: URL, minPixelDimension: Int = 24) async -> Data? {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
         var req = URLRequest(url: url, timeoutInterval: 8)
         req.setValue(UserAgentPreset.safariMac.resolvedUserAgent(customValue: ""), forHTTPHeaderField: "User-Agent")
 

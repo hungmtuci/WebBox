@@ -67,7 +67,7 @@ final class UpdateCheckerService: ObservableObject {
     }
 
     var currentVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.6"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.7"
     }
 
     var availableUpdateInfo: ReleaseUpdateInfo? {
@@ -597,6 +597,7 @@ final class UpdateCheckerService: ObservableObject {
         DST_APP="$3"
         DST_SECONDARY="$4"
         STAGE_DIR="$5"
+        export SRC_APP DST_APP
 
         for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
             kill -0 "$OLD_PID" 2>/dev/null || break
@@ -604,18 +605,38 @@ final class UpdateCheckerService: ObservableObject {
         done
 
         DST_PARENT="$(dirname "$DST_APP")"
-        if [ -w "$DST_PARENT" ] && { [ ! -e "$DST_APP" ] || [ -w "$DST_APP" ]; } && rm -rf "$DST_APP" 2>/dev/null && /usr/bin/ditto --noextattr "$SRC_APP" "$DST_APP" 2>/dev/null; then
-            /usr/bin/xattr -cr "$DST_APP" 2>/dev/null || true
+        DST_STAGE="${DST_APP}.new"
+        SWAP_OK=0
+        if [ -w "$DST_PARENT" ] && { [ ! -e "$DST_APP" ] || [ -w "$DST_APP" ]; }; then
+            if rm -rf "$DST_STAGE" 2>/dev/null && /usr/bin/ditto --noextattr "$SRC_APP" "$DST_STAGE" 2>/dev/null && rm -rf "$DST_APP" 2>/dev/null && mv "$DST_STAGE" "$DST_APP" 2>/dev/null; then
+                /usr/bin/xattr -cr "$DST_APP" 2>/dev/null || true
+                SWAP_OK=1
+            else
+                rm -rf "$DST_STAGE" 2>/dev/null || true
+            fi
         else
-            /usr/bin/osascript -e "do shell script \\"rm -rf '$DST_APP' && /usr/bin/ditto --noextattr '$SRC_APP' '$DST_APP' && /usr/bin/xattr -cr '$DST_APP'\\" with administrator privileges" 2>/dev/null || true
+            if /usr/bin/osascript \\
+                -e 'set srcApp to system attribute "SRC_APP"' \\
+                -e 'set dstApp to system attribute "DST_APP"' \\
+                -e 'set dstStage to dstApp & ".new"' \\
+                -e 'set cmd to "rm -rf " & quoted form of dstStage & " && /usr/bin/ditto --noextattr " & quoted form of srcApp & " " & quoted form of dstStage & " && rm -rf " & quoted form of dstApp & " && mv " & quoted form of dstStage & " " & quoted form of dstApp & " && /usr/bin/xattr -cr " & quoted form of dstApp' \\
+                -e 'do shell script cmd with administrator privileges' 2>/dev/null; then
+                SWAP_OK=1
+            fi
         fi
 
         if [ -n "$DST_SECONDARY" ] && [ -d "$DST_SECONDARY" ]; then
-            rm -rf "$DST_SECONDARY" 2>/dev/null && /usr/bin/ditto --noextattr "$SRC_APP" "$DST_SECONDARY" 2>/dev/null || true
-            /usr/bin/xattr -cr "$DST_SECONDARY" 2>/dev/null || true
+            DST_SEC_STAGE="${DST_SECONDARY}.new"
+            if rm -rf "$DST_SEC_STAGE" 2>/dev/null && /usr/bin/ditto --noextattr "$SRC_APP" "$DST_SEC_STAGE" 2>/dev/null && rm -rf "$DST_SECONDARY" 2>/dev/null && mv "$DST_SEC_STAGE" "$DST_SECONDARY" 2>/dev/null; then
+                /usr/bin/xattr -cr "$DST_SECONDARY" 2>/dev/null || true
+            else
+                rm -rf "$DST_SEC_STAGE" 2>/dev/null || true
+            fi
         fi
 
-        /usr/bin/open "$DST_APP"
+        if [ "$SWAP_OK" -eq 1 ] && [ -d "$DST_APP" ]; then
+            /usr/bin/open "$DST_APP"
+        fi
         rm -rf "$STAGE_DIR"
         """
 

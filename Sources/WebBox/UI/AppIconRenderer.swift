@@ -212,6 +212,10 @@ enum AppIconRenderer {
         process.arguments = ["-c", "icns", tempDir.path, "-o", destinationICNSURL.path]
         try process.run()
         process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              FileManager.default.fileExists(atPath: destinationICNSURL.path) else {
+            throw DedicatedAppBuildError.iconGenerationFailed
+        }
     }
 }
 

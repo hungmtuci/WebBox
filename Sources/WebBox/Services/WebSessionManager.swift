@@ -670,6 +670,46 @@ private final class AuthPopupWindow: NSObject, NSWindowDelegate, WKUIDelegate, W
             window.title = t
         }
     }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+            webView.load(URLRequest(url: url))
+        }
+        return nil
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = window.title.isEmpty ? "WebBox" : window.title
+        alert.informativeText = message
+        alert.addButton(withTitle: L10n.close)
+        alert.runModal()
+        completionHandler()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = window.title.isEmpty ? "WebBox" : window.title
+        alert.informativeText = message
+        alert.addButton(withTitle: L10n.s("Đồng ý", "OK"))
+        alert.addButton(withTitle: L10n.cancel)
+        completionHandler(alert.runModal() == .alertFirstButtonReturn)
+    }
 }
 
 // MARK: - WebSessionManager
@@ -1532,7 +1572,28 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
         type: WKMediaCaptureType,
         decisionHandler: @escaping (WKPermissionDecision) -> Void
     ) {
-        decisionHandler(.grant)
+        let host = origin.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let proto = origin.protocol.isEmpty ? "https" : origin.protocol
+        if !host.isEmpty,
+           let originURL = URL(string: "\(proto)://\(host)"),
+           LinkRouter.isInternalAppURL(originURL, for: instance) {
+            decisionHandler(.grant)
+            return
+        }
+
+        let alert = NSAlert()
+        let hostDisplay = host.isEmpty ? (frame.request.url?.host ?? "trang web bên thứ ba") : host
+        alert.messageText = L10n.s(
+            "Cho phép \"\(hostDisplay)\" truy cập Camera / Micro?",
+            "Allow \"\(hostDisplay)\" to access Camera / Microphone?"
+        )
+        alert.informativeText = L10n.s(
+            "Trang nhúng bên thứ ba trong \(instance.displayTitle) đang yêu cầu quyền ghi hình hoặc thu âm.",
+            "A third-party frame inside \(instance.displayTitle) is requesting media capture access."
+        )
+        alert.addButton(withTitle: L10n.s("Cho phép", "Allow"))
+        alert.addButton(withTitle: L10n.s("Từ chối", "Deny"))
+        decisionHandler(alert.runModal() == .alertFirstButtonReturn ? .grant : .deny)
     }
 
     func webView(
@@ -1745,6 +1806,14 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if let url = navigationAction.request.url {
+            let abs = url.absoluteString
+            if abs.isEmpty || abs == "about:blank" {
+                return manager?.registerDeferredCatcher(
+                    sourceInstanceID: tab.ownerInstanceID,
+                    configuration: configuration
+                )
+            }
+
             if url.scheme?.lowercased() == "blob" {
                 manager?.handleBlobPopupNavigation(url, from: webView, sourceTitle: "Trình duyệt WebBox")
                 return nil
@@ -1756,8 +1825,13 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
             if let scheme = url.scheme?.lowercased(), (scheme == "http" || scheme == "https") {
                 WorkspaceStore.shared.openLinkInAppBrowser(LinkRouter.unwrapRedirectURL(url), for: tab.ownerInstanceID)
             }
+            return nil
         }
-        return nil
+
+        return manager?.registerDeferredCatcher(
+            sourceInstanceID: tab.ownerInstanceID,
+            configuration: configuration
+        )
     }
 
     func webView(
@@ -1804,6 +1878,52 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         } else {
             completionHandler(panel.runModal() == .OK ? panel.urls : nil)
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = tab.title
+        alert.informativeText = message
+        alert.addButton(withTitle: L10n.close)
+        alert.runModal()
+        completionHandler()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = tab.title
+        alert.informativeText = message
+        alert.addButton(withTitle: L10n.s("Đồng ý", "OK"))
+        alert.addButton(withTitle: L10n.cancel)
+        completionHandler(alert.runModal() == .alertFirstButtonReturn)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = tab.title
+        alert.informativeText = prompt
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        input.stringValue = defaultText ?? ""
+        alert.accessoryView = input
+        alert.addButton(withTitle: L10n.ok)
+        alert.addButton(withTitle: L10n.cancel)
+        completionHandler(alert.runModal() == .alertFirstButtonReturn ? input.stringValue : nil)
     }
 }
 

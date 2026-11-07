@@ -117,6 +117,7 @@ enum ContextMediaExtractor {
         let escapedCSS = customCSS
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "`", with: "\\`")
+            .replacingOccurrences(of: "$", with: "\\$")
 
         let clickInterceptionBlock = includeLinkClickInterception ? """
             document.addEventListener('click', function(e) {
@@ -809,7 +810,8 @@ enum ContextMediaExtractor {
         let (bytes, parsedMime) = decodeDataURL(dUrl) else {
             return nil
         }
-        let mime = ((dict["mimeType"] as? String) ?? "").isEmpty ? parsedMime : (dict["mimeType"] as! String)
+        let rawMime = (dict["mimeType"] as? String) ?? ""
+        let mime = rawMime.isEmpty ? parsedMime : rawMime
         let fname = suggestedFilenameForURL(nil, explicitDownloadAttr: "", mimeType: mime, defaultPrefix: "Tep_WebBox")
         return (bytes, mime, fname)
     }

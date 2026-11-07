@@ -418,6 +418,9 @@ final class WorkspaceStore: ObservableObject {
         inAppTabs.removeAll { $0.ownerInstanceID == id }
 
         let otherSharingSameProfile = instances.contains { $0.profileID == removed.profileID }
+        if !otherSharingSameProfile {
+            profiles.removeAll { $0.id == removed.profileID }
+        }
         WebSessionManager.shared.destroyInstanceSession(
             instanceID: id,
             profileID: clearWebsiteData && !otherSharingSameProfile ? removed.profileID : nil

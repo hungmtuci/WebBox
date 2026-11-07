@@ -249,7 +249,11 @@ enum LinkRouter {
         if !trimmed.contains("://") {
             trimmed = "https://\(trimmed)"
         }
-        guard let url = URL(string: trimmed), let host = url.host, !host.isEmpty else {
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https"),
+              let host = url.host,
+              !host.isEmpty else {
             return nil
         }
         return url

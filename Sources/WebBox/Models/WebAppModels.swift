@@ -16,38 +16,41 @@ enum LinkRoutingMode: String, Codable, CaseIterable, Identifiable {
         [.askEveryTime, .inAppBrowser, .externalBrowser]
     }
 
+    @MainActor
     var title: String {
         switch self {
         case .useGlobal:
-            return "Theo cài đặt chung"
+            return L10n.s("Theo cài đặt chung", "Follow Global Default")
         case .askEveryTime:
-            return "Hỏi nhanh mỗi khi bấm link"
+            return L10n.s("Hỏi nhanh mỗi khi bấm link", "Ask Every Time")
         case .inAppBrowser:
-            return "Mở bằng Trình duyệt trong App"
+            return L10n.s("Mở bằng Trình duyệt trong App", "Open in In-App Browser")
         case .externalBrowser:
-            return "Mở bằng Trình duyệt ngoài (macOS)"
+            return L10n.s("Mở bằng Trình duyệt ngoài (macOS)", "Open in External Browser (macOS)")
         }
     }
 
+    @MainActor
     var shortTitle: String {
         switch self {
-        case .useGlobal: return "Mặc định chung"
-        case .askEveryTime: return "Hỏi mỗi lần"
-        case .inAppBrowser: return "Trong App"
-        case .externalBrowser: return "Trình duyệt ngoài"
+        case .useGlobal: return L10n.s("Mặc định chung", "Global Default")
+        case .askEveryTime: return L10n.s("Hỏi mỗi lần", "Ask Every Time")
+        case .inAppBrowser: return L10n.s("Trong App", "In-App")
+        case .externalBrowser: return L10n.s("Trình duyệt ngoài", "External Browser")
         }
     }
 
+    @MainActor
     var subtitle: String {
         switch self {
         case .useGlobal:
-            return "Sử dụng chế độ mở link mặc định của WebBox"
+            return L10n.s("Sử dụng chế độ mở link mặc định của WebBox", "Use WebBox's default link routing mode")
         case .askEveryTime:
-            return "Hiện bảng chọn nhanh: Mở trong App hoặc Mở trình duyệt ngoài"
+            return L10n.s("Hiện bảng chọn nhanh: Mở trong App hoặc Mở trình duyệt ngoài", "Show quick picker: Open in App or Open in External Browser")
         case .inAppBrowser:
-            return "Mở ngay trong khung trình duyệt tích hợp (có nút chuyển ra ngoài)"
+            return L10n.s("Mở ngay trong khung trình duyệt tích hợp (có nút chuyển ra ngoài)", "Open directly in the built-in browser pane (with external browser button)")
         case .externalBrowser:
-            return "Tự động mở bằng Safari, Chrome, Arc... trên hệ thống"
+            return L10n.s("Tự động mở bằng Safari, Chrome, Arc... trên hệ thống", "Automatically open in Safari, Chrome, Arc... on macOS")
         }
     }
 
@@ -67,10 +70,11 @@ enum InAppBrowserLayoutMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    @MainActor
     var title: String {
         switch self {
-        case .splitRight: return "Chia đôi cạnh bên (Vừa xem link vừa chat)"
-        case .fullOverlay: return "Toàn khung cửa sổ (Như tab trình duyệt)"
+        case .splitRight: return L10n.s("Chia đôi cạnh bên (Vừa xem link vừa chat)", "Split Right (Browse links while chatting)")
+        case .fullOverlay: return L10n.s("Toàn khung cửa sổ (Như tab trình duyệt)", "Full Window Overlay (Like browser tab)")
         }
     }
 
@@ -90,16 +94,17 @@ enum UserAgentPreset: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    @MainActor
     var title: String {
         switch self {
         case .safariMac:
-            return "Safari macOS (Khuyên dùng - Chuẩn OAuth & Zalo/FB)"
+            return L10n.s("Safari macOS (Khuyên dùng - Chuẩn OAuth & Zalo/FB)", "Safari macOS (Recommended - Best for OAuth & Zalo/FB)")
         case .chromeMac:
-            return "Google Chrome macOS"
+            return L10n.s("Google Chrome macOS", "Google Chrome macOS")
         case .mobileIOS:
-            return "Safari iPhone (Giao diện Mobile)"
+            return L10n.s("Safari iPhone (Giao diện Mobile)", "Safari iPhone (Mobile View)")
         case .custom:
-            return "Tuỳ chỉnh (Custom User-Agent)"
+            return L10n.s("Tuỳ chỉnh (Custom User-Agent)", "Custom User-Agent")
         }
     }
 
@@ -258,7 +263,14 @@ struct WebAppInstance: Codable, Identifiable, Hashable {
     }
 
     var baseURL: URL {
-        URL(string: baseURLString) ?? URL(string: "https://example.com")!
+        if let candidate = URL(string: baseURLString),
+           let scheme = candidate.scheme?.lowercased(),
+           (scheme == "http" || scheme == "https"),
+           let host = candidate.host,
+           !host.isEmpty {
+            return candidate
+        }
+        return URL(string: "https://example.com")!
     }
 
     var resolvedUserAgent: String {
@@ -285,14 +297,15 @@ enum SidebarDisplayMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    @MainActor
     var title: String {
         switch self {
         case .expanded:
-            return "Đầy đủ (Icon & Tên tài khoản)"
+            return L10n.s("Đầy đủ (Icon & Tên tài khoản)", "Full (Icons & Account names)")
         case .compactIcons:
-            return "Thu gọn (Chỉ hiện biểu tượng Icon)"
+            return L10n.s("Thu gọn (Chỉ hiện biểu tượng Icon)", "Compact (Icon rail only)")
         case .hidden:
-            return "Ẩn hoàn toàn"
+            return L10n.s("Ẩn hoàn toàn", "Hidden completely")
         }
     }
 }

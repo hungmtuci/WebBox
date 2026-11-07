@@ -7,8 +7,8 @@ cd "$PROJECT_DIR"
 
 APP_NAME="WebBox"
 BUNDLE_ID="com.hunglx.WebBox"
-VERSION="${WEBBOX_VERSION:-1.0.6}"
-BUILD_NUMBER="${WEBBOX_BUILD_NUMBER:-7}"
+VERSION="${WEBBOX_VERSION:-1.0.7}"
+BUILD_NUMBER="${WEBBOX_BUILD_NUMBER:-8}"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 ROOT_APP_BUNDLE="$ROOT_WORKSPACE_DIR/$APP_NAME.app"
 DIST_DIR="$PROJECT_DIR/dist"
@@ -21,8 +21,11 @@ else
     BIN_PATH="$(swift build -c release --product "$APP_NAME" --show-bin-path)/$APP_NAME"
 fi
 
+STAGE_ROOT="$(mktemp -d /tmp/WebBoxBuildStage.XXXXXX)"
+trap 'rm -rf "$STAGE_ROOT"' EXIT
+
 echo "==> [2/6] Đang tạo biểu tượng ứng dụng (AppIcon.icns)..."
-ICONSET_DIR="$PROJECT_DIR/.build/AppIcon.iconset"
+ICONSET_DIR="$STAGE_ROOT/AppIcon.iconset"
 rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"
 
@@ -119,8 +122,6 @@ for (px, name) in sizes {
 SWIFT_ICON
 
 echo "==> [3/6] Đang đóng gói $APP_NAME.app..."
-STAGE_ROOT="$(mktemp -d /tmp/WebBoxBuildStage.XXXXXX)"
-trap 'rm -rf "$STAGE_ROOT"' EXIT
 STAGE_APP="$STAGE_ROOT/$APP_NAME.app"
 STAGE_CONTENTS="$STAGE_APP/Contents"
 STAGE_MACOS="$STAGE_CONTENTS/MacOS"
@@ -130,7 +131,7 @@ mkdir -p "$STAGE_MACOS" "$STAGE_RESOURCES"
 cp -X "$BIN_PATH" "$STAGE_MACOS/$APP_NAME"
 chmod +x "$STAGE_MACOS/$APP_NAME"
 
-iconutil -c icns "$ICONSET_DIR" -o "$STAGE_RESOURCES/AppIcon.icns" || true
+iconutil -c icns "$ICONSET_DIR" -o "$STAGE_RESOURCES/AppIcon.icns"
 
 cat > "$STAGE_CONTENTS/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -216,13 +217,6 @@ xattr -cr "$STAGE_APP" 2>/dev/null || true
 codesign --force --deep --sign - "$STAGE_APP"
 codesign --verify --deep --strict "$STAGE_APP"
 
-rm -rf "$APP_BUNDLE"
-ditto --noextattr "$STAGE_APP" "$APP_BUNDLE"
-xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
-xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
-codesign --verify --deep --strict "$APP_BUNDLE" 2>/dev/null || true
-
 echo "==> [5/6] Đang tạo bộ cài đặt .DMG và .ZIP tại thư mục dist/..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
@@ -230,7 +224,7 @@ mkdir -p "$DIST_DIR"
 DMG_STAGING="$STAGE_ROOT/dmg_staging"
 mkdir -p "$DMG_STAGING"
 
-ditto --noextattr "$STAGE_APP" "$DMG_STAGING/$APP_NAME.app"
+ditto --norsrc --noextattr "$STAGE_APP" "$DMG_STAGING/$APP_NAME.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
 cat > "$DMG_STAGING/Cai_Dat_WebBox.command" << 'INSTALLER_EOF'
@@ -246,7 +240,7 @@ echo "===================================================="
 
 pkill -f "/Applications/WebBox.app" 2>/dev/null || true
 rm -rf "$APP_DST"
-ditto --noextattr "$APP_SRC" "$APP_DST"
+ditto --norsrc --noextattr "$APP_SRC" "$APP_DST"
 xattr -cr "$APP_DST" 2>/dev/null || true
 
 echo "✓ Đã cài đặt thành công tại: $APP_DST"
@@ -258,22 +252,33 @@ chmod +x "$DMG_STAGING/Cai_Dat_WebBox.command"
 xattr -cr "$DMG_STAGING" 2>/dev/null || true
 
 DMG_PATH="$DIST_DIR/${APP_NAME}-Installer-v${VERSION}.dmg"
+STAGE_DMG="$STAGE_ROOT/${APP_NAME}-Installer-v${VERSION}.dmg"
 hdiutil create -volname "${APP_NAME} Installer" \
     -srcfolder "$DMG_STAGING" \
     -ov -format UDZO \
-    "$DMG_PATH" >/dev/null
+    "$STAGE_DMG" >/dev/null
+mv -f "$STAGE_DMG" "$DMG_PATH"
 
 ZIP_PATH="$DIST_DIR/${APP_NAME}-v${VERSION}-macOS.zip"
 ditto -c -k --norsrc --noextattr --keepParent "$STAGE_APP" "$ZIP_PATH"
 
-echo "==> [6/6] Đồng bộ $ROOT_APP_BUNDLE..."
+echo "==> [6/6] Đồng bộ $APP_BUNDLE và $ROOT_APP_BUNDLE..."
+rm -rf "$APP_BUNDLE"
+ditto --norsrc --noextattr "$STAGE_APP" "$APP_BUNDLE"
+xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+codesign --force --deep --sign - "$APP_BUNDLE"
+xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+codesign --verify --deep --strict "$APP_BUNDLE"
+
 if [ "$ROOT_WORKSPACE_DIR" != "$PROJECT_DIR" ]; then
     rm -rf "$ROOT_APP_BUNDLE"
-    ditto --noextattr "$STAGE_APP" "$ROOT_APP_BUNDLE"
+    ditto --norsrc --noextattr "$STAGE_APP" "$ROOT_APP_BUNDLE"
     xattr -d com.apple.FinderInfo "$ROOT_APP_BUNDLE" 2>/dev/null || true
     xattr -cr "$ROOT_APP_BUNDLE" 2>/dev/null || true
-    codesign --force --deep --sign - "$ROOT_APP_BUNDLE" 2>/dev/null || true
-    codesign --verify --deep --strict "$ROOT_APP_BUNDLE" 2>/dev/null || true
+    codesign --force --deep --sign - "$ROOT_APP_BUNDLE"
+    xattr -d com.apple.FinderInfo "$ROOT_APP_BUNDLE" 2>/dev/null || true
+    codesign --verify --deep --strict "$ROOT_APP_BUNDLE"
 fi
 
 echo "==> Hoàn tất!"

@@ -3,6 +3,7 @@ import AppKit
 
 enum DedicatedAppBuildError: LocalizedError {
     case executableNotFound
+    case iconGenerationFailed
     case packagingFailed(String)
     case codesignFailed(String)
 
@@ -10,6 +11,8 @@ enum DedicatedAppBuildError: LocalizedError {
         switch self {
         case .executableNotFound:
             return "Không tìm thấy tệp thực thi gốc của WebBox để đóng gói ứng dụng độc lập."
+        case .iconGenerationFailed:
+            return "Không thể tạo tệp biểu tượng AppIcon.icns cho ứng dụng độc lập."
         case .packagingFailed(let detail):
             return "Lỗi khi đóng gói ứng dụng .app: \(detail)"
         case .codesignFailed(let detail):
@@ -160,8 +163,12 @@ enum DedicatedAppBuilder {
         let viLproj = resourcesURL.appendingPathComponent("vi.lproj")
         try? FileManager.default.createDirectory(at: enLproj, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: viLproj, withIntermediateDirectories: true)
-        let enStrings = "\"CFBundleDisplayName\" = \"\(escapedDisplayName)\";\n"
-        let viStrings = "\"CFBundleDisplayName\" = \"\(escapedDisplayName)\";\n"
+        let stringsEscapedDisplayName = displayName
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        let enStrings = "\"CFBundleDisplayName\" = \"\(stringsEscapedDisplayName)\";\n"
+        let viStrings = "\"CFBundleDisplayName\" = \"\(stringsEscapedDisplayName)\";\n"
         try? enStrings.write(to: enLproj.appendingPathComponent("InfoPlist.strings"), atomically: true, encoding: .utf8)
         try? viStrings.write(to: viLproj.appendingPathComponent("InfoPlist.strings"), atomically: true, encoding: .utf8)
 
@@ -181,6 +188,7 @@ enum DedicatedAppBuilder {
         _ = runProcess("/usr/bin/xattr", arguments: ["-d", "com.apple.FinderInfo", finalAppURL.path])
         _ = runProcess("/usr/bin/xattr", arguments: ["-cr", finalAppURL.path])
         _ = runProcess("/usr/bin/codesign", arguments: ["--force", "--deep", "--sign", "-", finalAppURL.path])
+        _ = runProcess("/usr/bin/xattr", arguments: ["-d", "com.apple.FinderInfo", finalAppURL.path])
 
         return finalAppURL
     }
