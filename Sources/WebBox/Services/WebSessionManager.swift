@@ -1600,7 +1600,7 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Fallback: If an internal/private site still has no icon, extract the live <link rel="icon"> URL from DOM
-        guard WorkspaceStore.shared.instance(for: instance.id)?.customIconPNGData == nil else { return }
+        guard WorkspaceStore.shared.instance(for: instance.id)?.hasCustomIcon == false else { return }
         let js = """
         (function() {
             const links = Array.from(document.querySelectorAll('link[rel*="icon"]'));
@@ -1614,7 +1614,7 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
         webView.evaluateJavaScript(js) { result, _ in
             guard let href = result as? String, !href.isEmpty, let iconURL = URL(string: href) else { return }
             Task { @MainActor in
-                guard WorkspaceStore.shared.instance(for: instID)?.customIconPNGData == nil else { return }
+                guard WorkspaceStore.shared.instance(for: instID)?.hasCustomIcon == false else { return }
                 if let png = await AppIconFetcher.shared.downloadAndNormalizeIcon(from: iconURL, minPixelDimension: 24) {
                     WorkspaceStore.shared.updateIconSilently(instanceID: instID, pngData: png)
                 }

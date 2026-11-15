@@ -53,7 +53,7 @@ struct CatalogAppPreset: Identifiable, Hashable {
         spaceID: UUID? = nil,
         profileID: UUID = UUID(),
         linkRoutingMode: LinkRoutingMode = .useGlobal,
-        customIconPNGData: Data? = nil,
+        iconRevision: UInt64? = nil,
         sortOrder: Int = 0
     ) -> WebAppInstance {
         WebAppInstance(
@@ -65,7 +65,7 @@ struct CatalogAppPreset: Identifiable, Hashable {
             accentHex: accentHex,
             monogram: monogram,
             symbolName: symbolName,
-            customIconPNGData: customIconPNGData,
+            iconRevision: iconRevision,
             profileID: profileID,
             spaceID: spaceID,
             linkRoutingMode: linkRoutingMode,

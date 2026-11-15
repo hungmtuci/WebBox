@@ -82,12 +82,20 @@ enum DedicatedAppBuilder {
         let icnsURL = resourcesURL.appendingPathComponent("AppIcon.icns")
         try AppIconRenderer.writeICNSFile(for: instance, destinationICNSURL: icnsURL)
 
-        // 3. Write StandaloneApp.json manifest
+        // 3. Write StandaloneApp.json manifest (and bundle InstanceIcon.png for portable fallback)
         let resolvedFallback: LinkRoutingMode = preferences.defaultLinkRoutingMode == .useGlobal
             ? .askEveryTime
             : preferences.defaultLinkRoutingMode
         var standaloneInstance = instance
         standaloneInstance.exportedAppPath = finalAppURL.path
+        if let iconData = (instance.hasCustomIcon ? InstanceIconStore.loadIconData(for: instance.id) : nil)
+            ?? instance.catalogID.flatMap({ AppIconFetcher.shared.cachedIcon(forPresetID: $0) }),
+           !iconData.isEmpty {
+            try? iconData.write(to: resourcesURL.appendingPathComponent("InstanceIcon.png"), options: .atomic)
+            if standaloneInstance.iconRevision == nil {
+                standaloneInstance.iconRevision = InstanceIconStore.computeRevision(for: iconData)
+            }
+        }
 
         let manifest = StandaloneAppManifest(
             instance: standaloneInstance,
@@ -97,7 +105,7 @@ enum DedicatedAppBuilder {
             createdVersion: "1.0.0"
         )
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         let manifestData = try encoder.encode(manifest)
         try manifestData.write(to: resourcesURL.appendingPathComponent("StandaloneApp.json"))
 

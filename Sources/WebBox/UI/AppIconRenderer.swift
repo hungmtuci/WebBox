@@ -26,7 +26,7 @@ enum AppIconRenderer {
             return NSImage(size: NSSize(width: px, height: px))
         }
 
-        let resolvedIconData = instance.customIconPNGData
+        let resolvedIconData = (instance.hasCustomIcon ? InstanceIconStore.loadIconData(for: instance.id) : nil)
             ?? instance.catalogID.flatMap { AppIconFetcher.shared.cachedIcon(forPresetID: $0) }
 
         NSGraphicsContext.saveGraphicsState()
@@ -240,10 +240,14 @@ struct AppInstanceAvatarView: View {
     let instance: WebAppInstance
     var size: CGFloat = 32
     var showBadgePill: Bool = true
+    var previewIconData: Data? = nil
     @ObservedObject private var iconFetcher = AppIconFetcher.shared
 
     private var effectiveIconData: Data? {
-        if let custom = instance.customIconPNGData {
+        if let previewIconData, !previewIconData.isEmpty {
+            return previewIconData
+        }
+        if instance.hasCustomIcon, let custom = InstanceIconStore.loadIconData(for: instance.id) {
             return custom
         }
         if let cid = instance.catalogID {

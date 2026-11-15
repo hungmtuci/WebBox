@@ -89,15 +89,14 @@ final class AppIconFetcher: ObservableObject {
     /// Automatically populates icons for all existing Workspace instances that don't have one yet,
     /// and pre-warms icons for Catalog presets in the background.
     func backfillMissingIcons(in store: WorkspaceStore) {
-        for instance in store.instances where instance.customIconPNGData == nil {
+        for instance in store.instances where !instance.hasCustomIcon {
             Task { @MainActor in
                 if let iconData = await fetchBestIcon(
                     catalogID: instance.catalogID,
                     appName: instance.name,
                     siteURL: instance.baseURL
                 ) {
-                    if var latest = store.instance(for: instance.id), latest.customIconPNGData == nil {
-                        latest.customIconPNGData = iconData
+                    if let latest = store.instance(for: instance.id), !latest.hasCustomIcon {
                         store.updateIconSilently(instanceID: latest.id, pngData: iconData)
                     }
                 }

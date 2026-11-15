@@ -23,10 +23,19 @@ final class WorkspaceStore: ObservableObject {
     @Published var preferences = GlobalWorkspacePreferences()
 
     // Active navigation state
-    @Published var selectedSpaceID: UUID? = nil // nil = Tất cả
+    @Published var selectedSpaceID: UUID? = nil { // nil = Tất cả
+        didSet {
+            if isLoaded, !isStandaloneMode, oldValue != selectedSpaceID {
+                persistSelectionToDefaults()
+            }
+        }
+    }
     @Published var activeInstanceID: UUID? = nil {
         didSet {
             if isLoaded, oldValue != activeInstanceID {
+                if !isStandaloneMode {
+                    persistSelectionToDefaults()
+                }
                 WebSessionManager.shared.refreshUnreadSummary(activeInstanceID: activeInstance?.id)
             }
         }
@@ -73,13 +82,62 @@ final class WorkspaceStore: ObservableObject {
     private var isLoaded = false
     private var toastClearTask: Task<Void, Never>?
 
+    private static let activeInstanceDefaultsKey = "WebBox.activeInstanceID"
+    private static let selectedSpaceDefaultsKey = "WebBox.selectedSpaceID"
+    private static let didMigrateSelectionDefaultsKey = "WebBox.didMigrateSelectionToDefaults"
+
+    private struct HubPreferencesProbe: Decodable {
+        let preferences: GlobalWorkspacePreferences
+    }
+
     private struct PersistedHubState: Codable, Sendable {
         var spaces: [SpaceItem]
         var profiles: [SessionProfileInfo]
         var instances: [WebAppInstance]
         var preferences: GlobalWorkspacePreferences
-        var selectedSpaceID: UUID?
-        var activeInstanceID: UUID?
+        var legacySelectedSpaceID: UUID? = nil
+        var legacyActiveInstanceID: UUID? = nil
+        var hadLegacySelectionKeys: Bool = false
+
+        private enum CodingKeys: String, CodingKey {
+            case spaces
+            case profiles
+            case instances
+            case preferences
+            case selectedSpaceID
+            case activeInstanceID
+        }
+
+        init(
+            spaces: [SpaceItem],
+            profiles: [SessionProfileInfo],
+            instances: [WebAppInstance],
+            preferences: GlobalWorkspacePreferences
+        ) {
+            self.spaces = spaces
+            self.profiles = profiles
+            self.instances = instances
+            self.preferences = preferences
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.spaces = try c.decode([SpaceItem].self, forKey: .spaces)
+            self.profiles = try c.decode([SessionProfileInfo].self, forKey: .profiles)
+            self.instances = try c.decode([WebAppInstance].self, forKey: .instances)
+            self.preferences = try c.decode(GlobalWorkspacePreferences.self, forKey: .preferences)
+            self.legacySelectedSpaceID = try c.decodeIfPresent(UUID.self, forKey: .selectedSpaceID)
+            self.legacyActiveInstanceID = try c.decodeIfPresent(UUID.self, forKey: .activeInstanceID)
+            self.hadLegacySelectionKeys = c.contains(.selectedSpaceID) || c.contains(.activeInstanceID)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(spaces, forKey: .spaces)
+            try c.encode(profiles, forKey: .profiles)
+            try c.encode(instances, forKey: .instances)
+            try c.encode(preferences, forKey: .preferences)
+        }
     }
 
     private init() {
@@ -110,13 +168,15 @@ final class WorkspaceStore: ObservableObject {
         let overrideFile = overrideDir.appendingPathComponent("\(manifest.instance.id.uuidString).json")
 
         var loadedInstance = manifest.instance
+        var shouldMigrateOverride = false
         if let data = try? Data(contentsOf: overrideFile),
            let saved = try? JSONDecoder().decode(WebAppInstance.self, from: data) {
             loadedInstance = saved
+            shouldMigrateOverride = data.range(of: Data("\"customIconPNGData\"".utf8)) != nil
         }
 
         if let hubData = try? Data(contentsOf: stateFileURL),
-           let hubDecoded = try? JSONDecoder().decode(PersistedHubState.self, from: hubData) {
+           let hubDecoded = try? JSONDecoder().decode(HubPreferencesProbe.self, from: hubData) {
             self.preferences.downloadsDirectory = hubDecoded.preferences.downloadsDirectory
             self.preferences.askWhereToSaveEachDownload = hubDecoded.preferences.askWhereToSaveEachDownload
         }
@@ -133,18 +193,72 @@ final class WorkspaceStore: ObservableObject {
         ]
         self.instances = [loadedInstance]
         self.activeInstanceID = loadedInstance.id
+        if shouldMigrateOverride {
+            save()
+        }
+    }
+
+    private func persistSelectionToDefaults() {
+        let defaults = UserDefaults.standard
+        if let spaceID = selectedSpaceID {
+            defaults.set(spaceID.uuidString, forKey: Self.selectedSpaceDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.selectedSpaceDefaultsKey)
+        }
+        if let activeID = activeInstanceID {
+            defaults.set(activeID.uuidString, forKey: Self.activeInstanceDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.activeInstanceDefaultsKey)
+        }
+        defaults.set(true, forKey: Self.didMigrateSelectionDefaultsKey)
     }
 
     private func loadHubState() {
+        let defaults = UserDefaults.standard
         if let data = try? Data(contentsOf: stateFileURL),
            let decoded = try? JSONDecoder().decode(PersistedHubState.self, from: data) {
             self.spaces = decoded.spaces
             self.profiles = decoded.profiles
             self.instances = decoded.instances.sorted { $0.sortOrder < $1.sortOrder }
             self.preferences = decoded.preferences
-            self.selectedSpaceID = decoded.selectedSpaceID
-            self.activeInstanceID = decoded.activeInstanceID ?? self.instances.first?.id
+
+            if defaults.bool(forKey: Self.didMigrateSelectionDefaultsKey) {
+                if let savedSpaceStr = defaults.string(forKey: Self.selectedSpaceDefaultsKey),
+                   let savedSpaceID = UUID(uuidString: savedSpaceStr),
+                   self.spaces.contains(where: { $0.id == savedSpaceID }) {
+                    self.selectedSpaceID = savedSpaceID
+                } else {
+                    self.selectedSpaceID = nil
+                }
+
+                if let savedActiveStr = defaults.string(forKey: Self.activeInstanceDefaultsKey),
+                   let savedActiveID = UUID(uuidString: savedActiveStr),
+                   self.instances.contains(where: { $0.id == savedActiveID }) {
+                    self.activeInstanceID = savedActiveID
+                } else {
+                    self.activeInstanceID = self.filteredInstances.first?.id ?? self.instances.first?.id
+                }
+            } else {
+                if let legacySpace = decoded.legacySelectedSpaceID,
+                   self.spaces.contains(where: { $0.id == legacySpace }) {
+                    self.selectedSpaceID = legacySpace
+                } else {
+                    self.selectedSpaceID = nil
+                }
+                if let legacyActive = decoded.legacyActiveInstanceID,
+                   self.instances.contains(where: { $0.id == legacyActive }) {
+                    self.activeInstanceID = legacyActive
+                } else {
+                    self.activeInstanceID = self.filteredInstances.first?.id ?? self.instances.first?.id
+                }
+                persistSelectionToDefaults()
+            }
+
             verifyExportedAppPaths()
+            let hadInlineIcons = data.range(of: Data("\"customIconPNGData\"".utf8)) != nil
+            if (decoded.hadLegacySelectionKeys || hadInlineIcons) && !hasPendingSave {
+                save()
+            }
             return
         }
 
@@ -184,6 +298,7 @@ final class WorkspaceStore: ObservableObject {
 
         self.instances = starterInstances
         self.activeInstanceID = starterInstances.first?.id
+        persistSelectionToDefaults()
         save()
     }
 
@@ -230,14 +345,11 @@ final class WorkspaceStore: ObservableObject {
             spaces: spaces,
             profiles: profiles,
             instances: instances,
-            preferences: preferences,
-            selectedSpaceID: selectedSpaceID,
-            activeInstanceID: activeInstanceID
+            preferences: preferences
         )
         let targetURL = stateFileURL
         let writeBlock: @Sendable () -> Void = {
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted]
             if let data = try? encoder.encode(payload) {
                 try? data.write(to: targetURL, options: .atomic)
             }
@@ -317,7 +429,6 @@ final class WorkspaceStore: ObservableObject {
         } else if isInAppBrowserVisible {
             isInAppBrowserVisible = false
         }
-        save()
     }
 
     func selectInstanceByIndex(_ zeroBasedIndex: Int) {
@@ -327,7 +438,11 @@ final class WorkspaceStore: ObservableObject {
     }
 
     @discardableResult
-    func addInstance(_ newInstance: WebAppInstance, ensureProfileName: String? = nil) -> WebAppInstance {
+    func addInstance(
+        _ newInstance: WebAppInstance,
+        customIconPNGData: Data? = nil,
+        ensureProfileName: String? = nil
+    ) -> WebAppInstance {
         var item = newInstance
         item.sortOrder = instances.count
 
@@ -342,10 +457,12 @@ final class WorkspaceStore: ObservableObject {
             )
         }
 
-        if item.customIconPNGData == nil,
-           let cid = item.catalogID,
-           let cached = AppIconFetcher.shared.cachedIcon(forPresetID: cid) {
-            item.customIconPNGData = cached
+        if let explicitPNG = customIconPNGData, !explicitPNG.isEmpty {
+            item.iconRevision = InstanceIconStore.saveIconData(explicitPNG, for: item.id)
+        } else if !item.hasCustomIcon,
+                  let cid = item.catalogID,
+                  let cached = AppIconFetcher.shared.cachedIcon(forPresetID: cid) {
+            item.iconRevision = InstanceIconStore.saveIconData(cached, for: item.id)
         }
 
         instances.append(item)
@@ -353,7 +470,7 @@ final class WorkspaceStore: ObservableObject {
         save()
         showToast("Đã thêm \(item.displayTitle)")
 
-        if item.customIconPNGData == nil {
+        if !item.hasCustomIcon {
             AppIconFetcher.shared.backfillMissingIcons(in: self)
         }
         return item
@@ -385,44 +502,68 @@ final class WorkspaceStore: ObservableObject {
         cloned.createdAt = Date()
         cloned.sortOrder = instances.count
 
+        if let copiedRev = InstanceIconStore.copyIconIfPresent(from: source.id, to: cloned.id) {
+            cloned.iconRevision = copiedRev
+        } else if let cid = cloned.catalogID,
+                  let cached = AppIconFetcher.shared.cachedIcon(forPresetID: cid) {
+            cloned.iconRevision = InstanceIconStore.saveIconData(cached, for: cloned.id)
+        } else {
+            cloned.iconRevision = nil
+        }
+
         instances.append(cloned)
         selectInstance(cloned.id)
         save()
         showToast("Đã tạo \(cloned.displayTitle) (Phiên đăng nhập độc lập mới)")
-        if cloned.customIconPNGData == nil {
+        if !cloned.hasCustomIcon {
             AppIconFetcher.shared.backfillMissingIcons(in: self)
         }
         return cloned
     }
 
     func updateIconSilently(instanceID: UUID, pngData: Data) {
-        guard let idx = instances.firstIndex(where: { $0.id == instanceID }) else { return }
-        instances[idx].customIconPNGData = pngData
+        guard !pngData.isEmpty,
+              let idx = instances.firstIndex(where: { $0.id == instanceID }) else { return }
+        let rev = InstanceIconStore.saveIconData(pngData, for: instanceID)
+        guard instances[idx].iconRevision != rev else { return }
+        instances[idx].iconRevision = rev
         save()
     }
 
-    func updateInstance(_ updated: WebAppInstance) {
+    func updateInstance(
+        _ updated: WebAppInstance,
+        pendingIconData: Data? = nil,
+        clearCustomIcon: Bool = false
+    ) {
         guard let idx = instances.firstIndex(where: { $0.id == updated.id }) else { return }
         let old = instances[idx]
-        instances[idx] = updated
+        var next = updated
+        if let png = pendingIconData, !png.isEmpty {
+            next.iconRevision = InstanceIconStore.saveIconData(png, for: next.id)
+        } else if clearCustomIcon {
+            InstanceIconStore.removeIcon(for: next.id)
+            next.iconRevision = nil
+        }
+        instances[idx] = next
 
-        if !profiles.contains(where: { $0.id == updated.profileID }) {
+        if !profiles.contains(where: { $0.id == next.profileID }) {
             profiles.append(
                 SessionProfileInfo(
-                    id: updated.profileID,
-                    name: updated.displayTitle,
-                    colorHex: updated.accentHex
+                    id: next.profileID,
+                    name: next.displayTitle,
+                    colorHex: next.accentHex
                 )
             )
         }
 
         save()
-        WebSessionManager.shared.applyUpdatedSettings(from: old, to: updated)
+        WebSessionManager.shared.applyUpdatedSettings(from: old, to: next)
     }
 
     func removeInstance(_ id: UUID, clearWebsiteData: Bool = false) {
         guard let idx = instances.firstIndex(where: { $0.id == id }) else { return }
         let removed = instances.remove(at: idx)
+        InstanceIconStore.removeIcon(for: id)
         inAppTabs.removeAll { $0.ownerInstanceID == id }
 
         let otherSharingSameProfile = instances.contains { $0.profileID == removed.profileID }

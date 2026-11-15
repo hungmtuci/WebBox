@@ -351,10 +351,9 @@ struct CatalogSheetView: View {
         let inst = preset.makeInstance(
             accountLabel: label,
             badgeShortText: badge,
-            spaceID: store.selectedSpaceID,
-            customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
+            spaceID: store.selectedSpaceID
         )
-        store.addInstance(inst)
+        store.addInstance(inst, customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id))
         dismiss()
     }
 
@@ -371,10 +370,9 @@ struct CatalogSheetView: View {
                             badgeShortText: ui.customBadgeText,
                             baseURLString: ui.customURLInput.isEmpty ? "https://example.com" : ui.customURLInput,
                             accentHex: ui.customAccentHex,
-                            monogram: String((ui.customAppName.isEmpty ? "W" : ui.customAppName).prefix(2)).uppercased(),
-                            customIconPNGData: ui.customIconData
+                            monogram: String((ui.customAppName.isEmpty ? "W" : ui.customAppName).prefix(2)).uppercased()
                         )
-                        AppInstanceAvatarView(instance: previewInst, size: 60)
+                        AppInstanceAvatarView(instance: previewInst, size: 60, previewIconData: ui.customIconData)
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 8) {
@@ -559,12 +557,11 @@ struct CatalogSheetView: View {
             baseURLString: validURL.absoluteString,
             accentHex: ui.customAccentHex,
             monogram: mono,
-            customIconPNGData: ui.customIconData,
             spaceID: ui.customSpaceID,
             linkRoutingMode: ui.customLinkMode
         )
 
-        let created = store.addInstance(instance)
+        let created = store.addInstance(instance, customIconPNGData: ui.customIconData)
         if ui.customExportDedicatedApp {
             do {
                 _ = try store.exportDedicatedDesktopApp(
@@ -594,15 +591,18 @@ private struct PresetConfigurationDetailView: View {
     var body: some View {
         let previewInstance = preset.makeInstance(
             accountLabel: ui.presetAccountLabel,
-            badgeShortText: ui.presetBadgeShortText,
-            customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
+            badgeShortText: ui.presetBadgeShortText
         )
 
         VStack(spacing: 0) {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        AppInstanceAvatarView(instance: previewInstance, size: 56)
+                        AppInstanceAvatarView(
+                            instance: previewInstance,
+                            size: 56,
+                            previewIconData: iconFetcher.cachedIcon(forPresetID: preset.id)
+                        )
                         VStack(alignment: .leading, spacing: 3) {
                             Text(preset.name)
                                 .font(.title3.weight(.semibold))
@@ -683,10 +683,9 @@ private struct PresetConfigurationDetailView: View {
                         badgeShortText: ui.presetBadgeShortText.trimmingCharacters(in: .whitespacesAndNewlines),
                         spaceID: ui.presetSelectedSpaceID,
                         profileID: chosenProfileID,
-                        linkRoutingMode: ui.presetLinkRoutingMode,
-                        customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id)
+                        linkRoutingMode: ui.presetLinkRoutingMode
                     )
-                    let added = store.addInstance(inst)
+                    let added = store.addInstance(inst, customIconPNGData: iconFetcher.cachedIcon(forPresetID: preset.id))
                     if ui.presetExportDedicatedApp {
                         _ = try? store.exportDedicatedDesktopApp(
                             for: added.id,

@@ -7,12 +7,20 @@ final class InstanceSettingsUIState: ObservableObject {
     static let shared = InstanceSettingsUIState()
 
     @Published var draft: WebAppInstance = WebAppInstance(name: "App", baseURLString: "https://example.com")
+    @Published var pendingIconData: Data? = nil
+    @Published var didClearCustomIcon: Bool = false
     @Published var confirmClearSession: Bool = false
     @Published var confirmDeleteInstance: Bool = false
     @Published var isFetchingIcon: Bool = false
 
+    var hasEffectiveCustomIcon: Bool {
+        pendingIconData != nil || (!didClearCustomIcon && draft.hasCustomIcon)
+    }
+
     func load(from instance: WebAppInstance) {
         self.draft = instance
+        self.pendingIconData = nil
+        self.didClearCustomIcon = false
         self.confirmClearSession = false
         self.confirmDeleteInstance = false
         self.isFetchingIcon = false
@@ -53,7 +61,7 @@ struct InstanceSettingsSheetView: View {
         VStack(spacing: 0) {
             // Native macOS Sheet Header
             HStack(spacing: 14) {
-                AppInstanceAvatarView(instance: ui.draft, size: 46)
+                AppInstanceAvatarView(instance: ui.draft, size: 46, previewIconData: ui.pendingIconData)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(ui.draft.displayTitle)
                         .font(.headline)
@@ -96,9 +104,11 @@ struct InstanceSettingsSheetView: View {
                             }
                             .controlSize(.small)
 
-                            if ui.draft.customIconPNGData != nil {
+                            if ui.hasEffectiveCustomIcon {
                                 Button("Đặt lại mặc định") {
-                                    ui.draft.customIconPNGData = nil
+                                    ui.pendingIconData = nil
+                                    ui.didClearCustomIcon = true
+                                    ui.draft.iconRevision = nil
                                 }
                                 .controlSize(.small)
                             }
@@ -181,10 +191,14 @@ struct InstanceSettingsSheetView: View {
                     if !store.isStandaloneMode {
                         HStack(spacing: 10) {
                             Button {
-                                store.updateInstance(ui.draft)
+                                store.updateInstance(
+                                    ui.draft,
+                                    pendingIconData: ui.pendingIconData,
+                                    clearCustomIcon: ui.didClearCustomIcon
+                                )
                                 _ = try? store.exportDedicatedDesktopApp(for: ui.draft.id, launchAfterExport: false, pinToDock: false)
                                 if let refreshed = store.instance(for: ui.draft.id) {
-                                    ui.draft = refreshed
+                                    ui.load(from: refreshed)
                                 }
                             } label: {
                                 Label(
@@ -270,7 +284,11 @@ struct InstanceSettingsSheetView: View {
                     if let normalized = LinkRouter.normalizeUserEnteredURL(ui.draft.baseURLString) {
                         ui.draft.baseURLString = normalized.absoluteString
                     }
-                    store.updateInstance(ui.draft)
+                    store.updateInstance(
+                        ui.draft,
+                        pendingIconData: ui.pendingIconData,
+                        clearCustomIcon: ui.didClearCustomIcon
+                    )
                     store.showToast("Đã lưu cài đặt cho \(ui.draft.displayTitle)")
                     dismiss()
                 }
@@ -325,8 +343,10 @@ struct InstanceSettingsSheetView: View {
         Task { @MainActor in
             defer { ui.isFetchingIcon = false }
             if let png = await AppIconFetcher.shared.fetchBestIcon(catalogID: cid, appName: name, siteURL: url) {
-                ui.draft.customIconPNGData = png
                 store.updateIconSilently(instanceID: ui.draft.id, pngData: png)
+                ui.pendingIconData = nil
+                ui.didClearCustomIcon = false
+                ui.draft.iconRevision = store.instance(for: ui.draft.id)?.iconRevision
                 store.showToast("Đã tải thành công Icon chuẩn cho \(name)")
             } else {
                 store.showToast("Không tìm thấy Icon độ phân giải cao cho trang này")
@@ -342,7 +362,8 @@ struct InstanceSettingsSheetView: View {
            let tiff = img.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),
            let png = rep.representation(using: .png, properties: [:]) {
-            ui.draft.customIconPNGData = png
+            ui.pendingIconData = png
+            ui.didClearCustomIcon = false
         }
     }
 }
