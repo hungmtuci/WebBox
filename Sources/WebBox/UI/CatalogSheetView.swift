@@ -31,12 +31,18 @@ final class CatalogUIState: ObservableObject {
     }
 
     // Custom Website Builder fields
+    let customPreviewInstanceID = UUID()
     @Published var customURLInput: String = ""
     @Published var customAppName: String = ""
     @Published var customAccountLabel: String = ""
     @Published var customBadgeText: String = ""
     @Published var customAccentHex: String = "#0A84FF"
-    @Published var customIconData: Data? = nil
+    @Published var customIconData: Data? = nil {
+        didSet {
+            customIconRevision = customIconData.flatMap { $0.isEmpty ? nil : InstanceIconStore.computeRevision(for: $0) }
+        }
+    }
+    private(set) var customIconRevision: UInt64? = nil
     @Published var customSpaceID: UUID? = nil
     @Published var customLinkMode: LinkRoutingMode = .useGlobal
     @Published var customExportDedicatedApp: Bool = false
@@ -365,6 +371,7 @@ struct CatalogSheetView: View {
                 Section(L10n.catalogWebsiteAndIcon) {
                     HStack(spacing: 16) {
                         let previewInst = WebAppInstance(
+                            id: ui.customPreviewInstanceID,
                             name: ui.customAppName.isEmpty ? "Web" : ui.customAppName,
                             accountLabel: ui.customAccountLabel,
                             badgeShortText: ui.customBadgeText,
@@ -372,7 +379,12 @@ struct CatalogSheetView: View {
                             accentHex: ui.customAccentHex,
                             monogram: String((ui.customAppName.isEmpty ? "W" : ui.customAppName).prefix(2)).uppercased()
                         )
-                        AppInstanceAvatarView(instance: previewInst, size: 60, previewIconData: ui.customIconData)
+                        AppInstanceAvatarView(
+                            instance: previewInst,
+                            size: 60,
+                            previewIconData: ui.customIconData,
+                            previewIconRevision: ui.customIconRevision
+                        )
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 8) {
@@ -600,8 +612,7 @@ private struct PresetConfigurationDetailView: View {
                     HStack(spacing: 14) {
                         AppInstanceAvatarView(
                             instance: previewInstance,
-                            size: 56,
-                            previewIconData: iconFetcher.cachedIcon(forPresetID: preset.id)
+                            size: 56
                         )
                         VStack(alignment: .leading, spacing: 3) {
                             Text(preset.name)

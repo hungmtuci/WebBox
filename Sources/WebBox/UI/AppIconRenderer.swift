@@ -241,33 +241,54 @@ struct AppInstanceAvatarView: View {
     var size: CGFloat = 32
     var showBadgePill: Bool = true
     var previewIconData: Data? = nil
+    var previewIconRevision: UInt64? = nil
     @ObservedObject private var iconFetcher = AppIconFetcher.shared
 
-    private var effectiveIconData: Data? {
-        if let previewIconData, !previewIconData.isEmpty {
-            return previewIconData
-        }
-        if instance.hasCustomIcon, let custom = InstanceIconStore.loadIconData(for: instance.id) {
-            return custom
-        }
-        if let cid = instance.catalogID {
-            return iconFetcher.cachedPresetIcons[cid]
-        }
-        return nil
-    }
-
     private var resolvedAvatar: DecodedAvatarBox? {
-        guard let data = effectiveIconData, !data.isEmpty else { return nil }
-        let head = data.prefix(16).hashValue
-        let tail = data.suffix(16).hashValue
-        let key = "\(data.count)_\(head)_\(tail)" as NSString
-        if let cached = Self.decodedCache.object(forKey: key) {
-            return cached
+        if let previewIconData, !previewIconData.isEmpty {
+            if let rev = previewIconRevision {
+                let key = "preview_\(instance.id.uuidString)_\(rev)" as NSString
+                if let cached = Self.decodedCache.object(forKey: key) {
+                    return cached
+                }
+                guard let nsImage = NSImage(data: previewIconData) else { return nil }
+                let box = DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
+                Self.decodedCache.setObject(box, forKey: key)
+                return box
+            }
+            guard let nsImage = NSImage(data: previewIconData) else { return nil }
+            return DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
         }
-        guard let nsImage = NSImage(data: data) else { return nil }
-        let box = DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
-        Self.decodedCache.setObject(box, forKey: key)
-        return box
+
+        if let rev = instance.iconRevision {
+            let key = "inst_\(instance.id.uuidString)_\(rev)" as NSString
+            if let cached = Self.decodedCache.object(forKey: key) {
+                return cached
+            }
+            if let data = InstanceIconStore.loadIconData(for: instance.id),
+               !data.isEmpty,
+               let nsImage = NSImage(data: data) {
+                let box = DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
+                Self.decodedCache.setObject(box, forKey: key)
+                return box
+            }
+        }
+
+        if let cid = instance.catalogID, let rev = iconFetcher.cachedPresetIconRevisions[cid] {
+            let key = "preset_\(cid)_\(rev)" as NSString
+            if let cached = Self.decodedCache.object(forKey: key) {
+                return cached
+            }
+            if let data = iconFetcher.cachedPresetIcons[cid],
+               !data.isEmpty,
+               let nsImage = NSImage(data: data) {
+                let box = DecodedAvatarBox(image: nsImage, isHighRes: Self.maxPixelDimension(of: nsImage) >= 96)
+                Self.decodedCache.setObject(box, forKey: key)
+                return box
+            }
+        }
+
+        return nil
     }
 
     var body: some View {

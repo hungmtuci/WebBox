@@ -7,7 +7,12 @@ final class InstanceSettingsUIState: ObservableObject {
     static let shared = InstanceSettingsUIState()
 
     @Published var draft: WebAppInstance = WebAppInstance(name: "App", baseURLString: "https://example.com")
-    @Published var pendingIconData: Data? = nil
+    @Published var pendingIconData: Data? = nil {
+        didSet {
+            pendingIconRevision = pendingIconData.flatMap { $0.isEmpty ? nil : InstanceIconStore.computeRevision(for: $0) }
+        }
+    }
+    private(set) var pendingIconRevision: UInt64? = nil
     @Published var didClearCustomIcon: Bool = false
     @Published var confirmClearSession: Bool = false
     @Published var confirmDeleteInstance: Bool = false
@@ -61,7 +66,12 @@ struct InstanceSettingsSheetView: View {
         VStack(spacing: 0) {
             // Native macOS Sheet Header
             HStack(spacing: 14) {
-                AppInstanceAvatarView(instance: ui.draft, size: 46, previewIconData: ui.pendingIconData)
+                AppInstanceAvatarView(
+                    instance: ui.draft,
+                    size: 46,
+                    previewIconData: ui.pendingIconData,
+                    previewIconRevision: ui.pendingIconRevision
+                )
                 VStack(alignment: .leading, spacing: 2) {
                     Text(ui.draft.displayTitle)
                         .font(.headline)

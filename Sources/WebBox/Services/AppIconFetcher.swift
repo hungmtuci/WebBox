@@ -10,6 +10,7 @@ final class AppIconFetcher: ObservableObject {
 
     /// In-memory cache keyed by preset ID or normalized domain host
     @Published private(set) var cachedPresetIcons: [String: Data] = [:]
+    private(set) var cachedPresetIconRevisions: [String: UInt64] = [:]
     private var inFlightKeys: Set<String> = []
     private var inFlightTasks: [String: Task<Data?, Never>] = [:]
     private let cacheDirectory: URL
@@ -73,17 +74,26 @@ final class AppIconFetcher: ObservableObject {
         loadDiskCachedPresetIcons()
     }
 
+    private func cachePresetIcon(_ data: Data, for presetID: String) {
+        cachedPresetIconRevisions[presetID] = InstanceIconStore.computeRevision(for: data)
+        cachedPresetIcons[presetID] = data
+    }
+
     private func loadDiskCachedPresetIcons() {
         for preset in CatalogDirectory.presets {
             let fileURL = cacheDirectory.appendingPathComponent("preset_\(preset.id).png")
             if let data = try? Data(contentsOf: fileURL), NSImage(data: data) != nil {
-                cachedPresetIcons[preset.id] = data
+                cachePresetIcon(data, for: preset.id)
             }
         }
     }
 
     func cachedIcon(forPresetID id: String) -> Data? {
         cachedPresetIcons[id]
+    }
+
+    func cachedIconRevision(forPresetID id: String) -> UInt64? {
+        cachedPresetIconRevisions[id]
     }
 
     /// Automatically populates icons for all existing Workspace instances that don't have one yet,
@@ -115,7 +125,7 @@ final class AppIconFetcher: ObservableObject {
                 defer { inFlightKeys.remove(key) }
                 guard let url = URL(string: preset.baseURLString) else { return }
                 if let data = await fetchBestIcon(catalogID: preset.id, appName: preset.name, siteURL: url) {
-                    cachedPresetIcons[preset.id] = data
+                    cachePresetIcon(data, for: preset.id)
                     let fileURL = cacheDirectory.appendingPathComponent("preset_\(preset.id).png")
                     try? data.write(to: fileURL, options: .atomic)
                 }
@@ -154,7 +164,7 @@ final class AppIconFetcher: ObservableObject {
             }
             let diskURL = cacheDirectory.appendingPathComponent("preset_\(cid).png")
             if let diskData = try? Data(contentsOf: diskURL), NSImage(data: diskData) != nil {
-                cachedPresetIcons[cid] = diskData
+                cachePresetIcon(diskData, for: cid)
                 return diskData
             }
         }
@@ -162,7 +172,7 @@ final class AppIconFetcher: ObservableObject {
         // 1. Try official 512px artwork from Apple iTunes / App Store Search API if preset or matching app name
         if let cid = catalogID, let mapping = Self.appStoreSearchTerms[cid] {
             if let png = await fetchFromITunesAPI(term: mapping.term, mustContain: mapping.mustContain) {
-                cachedPresetIcons[cid] = png
+                cachePresetIcon(png, for: cid)
                 try? png.write(to: cacheDirectory.appendingPathComponent("preset_\(cid).png"), options: .atomic)
                 return png
             }
@@ -172,7 +182,7 @@ final class AppIconFetcher: ObservableObject {
             return sHost == pHost || sHost.hasSuffix(".\(pHost)") || pHost.hasSuffix(".\(sHost)")
         }), let mapping = Self.appStoreSearchTerms[matchedPreset.id] {
             if let png = await fetchFromITunesAPI(term: mapping.term, mustContain: mapping.mustContain) {
-                cachedPresetIcons[matchedPreset.id] = png
+                cachePresetIcon(png, for: matchedPreset.id)
                 try? png.write(to: cacheDirectory.appendingPathComponent("preset_\(matchedPreset.id).png"), options: .atomic)
                 return png
             }
