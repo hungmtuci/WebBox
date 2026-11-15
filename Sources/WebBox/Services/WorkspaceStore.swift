@@ -19,7 +19,11 @@ final class WorkspaceStore: ObservableObject {
     // Persistent data
     @Published var spaces: [SpaceItem] = []
     @Published var profiles: [SessionProfileInfo] = []
-    @Published var instances: [WebAppInstance] = []
+    @Published var instances: [WebAppInstance] = [] {
+        didSet {
+            rebuildInstanceIndex()
+        }
+    }
     @Published var preferences = GlobalWorkspacePreferences()
 
     // Active navigation state
@@ -77,6 +81,7 @@ final class WorkspaceStore: ObservableObject {
     private let appSupportDir: URL
     private let stateFileURL: URL
     private let persistenceQueue = DispatchQueue(label: "com.hunglx.WebBox.persistence", qos: .utility)
+    private var instanceIndexByID: [UUID: Int] = [:]
     private var saveDebounceTask: Task<Void, Never>?
     private var hasPendingSave = false
     private var isLoaded = false
@@ -233,7 +238,7 @@ final class WorkspaceStore: ObservableObject {
 
                 if let savedActiveStr = defaults.string(forKey: Self.activeInstanceDefaultsKey),
                    let savedActiveID = UUID(uuidString: savedActiveStr),
-                   self.instances.contains(where: { $0.id == savedActiveID }) {
+                   self.instance(for: savedActiveID) != nil {
                     self.activeInstanceID = savedActiveID
                 } else {
                     self.activeInstanceID = self.filteredInstances.first?.id ?? self.instances.first?.id
@@ -246,7 +251,7 @@ final class WorkspaceStore: ObservableObject {
                     self.selectedSpaceID = nil
                 }
                 if let legacyActive = decoded.legacyActiveInstanceID,
-                   self.instances.contains(where: { $0.id == legacyActive }) {
+                   self.instance(for: legacyActive) != nil {
                     self.activeInstanceID = legacyActive
                 } else {
                     self.activeInstanceID = self.filteredInstances.first?.id ?? self.instances.first?.id
@@ -361,16 +366,38 @@ final class WorkspaceStore: ObservableObject {
         }
     }
 
+    private func rebuildInstanceIndex() {
+        var map: [UUID: Int] = [:]
+        map.reserveCapacity(instances.count)
+        for (idx, inst) in instances.enumerated() {
+            map[inst.id] = idx
+        }
+        instanceIndexByID = map
+    }
+
+    private func indexOfInstance(_ id: UUID) -> Int? {
+        if let idx = instanceIndexByID[id],
+           instances.indices.contains(idx),
+           instances[idx].id == id {
+            return idx
+        }
+        return instances.firstIndex { $0.id == id }
+    }
+
     func verifyExportedAppPaths() {
+        var updatedInstances = instances
         var changed = false
-        for idx in instances.indices {
-            if let path = instances[idx].exportedAppPath,
+        for idx in updatedInstances.indices {
+            if let path = updatedInstances[idx].exportedAppPath,
                !FileManager.default.fileExists(atPath: path) {
-                instances[idx].exportedAppPath = nil
+                updatedInstances[idx].exportedAppPath = nil
                 changed = true
             }
         }
-        if changed { save() }
+        if changed {
+            instances = updatedInstances
+            save()
+        }
     }
 
     // MARK: - Computed Helpers
@@ -384,16 +411,21 @@ final class WorkspaceStore: ObservableObject {
 
     var activeInstance: WebAppInstance? {
         guard let id = activeInstanceID else { return filteredInstances.first ?? instances.first }
-        return instances.first { $0.id == id }
+        return instance(for: id)
     }
 
     var secondarySplitInstance: WebAppInstance? {
         guard let id = secondarySplitInstanceID, id != activeInstanceID else { return nil }
-        return instances.first { $0.id == id }
+        return instance(for: id)
     }
 
     func instance(for id: UUID) -> WebAppInstance? {
-        instances.first { $0.id == id }
+        guard let idx = instanceIndexByID[id],
+              instances.indices.contains(idx),
+              instances[idx].id == id else {
+            return nil
+        }
+        return instances[idx]
     }
 
     var visibleInAppTabs: [InAppBrowserTab] {
@@ -523,7 +555,7 @@ final class WorkspaceStore: ObservableObject {
 
     func updateIconSilently(instanceID: UUID, pngData: Data) {
         guard !pngData.isEmpty,
-              let idx = instances.firstIndex(where: { $0.id == instanceID }) else { return }
+              let idx = indexOfInstance(instanceID) else { return }
         let rev = InstanceIconStore.saveIconData(pngData, for: instanceID)
         guard instances[idx].iconRevision != rev else { return }
         instances[idx].iconRevision = rev
@@ -535,7 +567,7 @@ final class WorkspaceStore: ObservableObject {
         pendingIconData: Data? = nil,
         clearCustomIcon: Bool = false
     ) {
-        guard let idx = instances.firstIndex(where: { $0.id == updated.id }) else { return }
+        guard let idx = indexOfInstance(updated.id) else { return }
         let old = instances[idx]
         var next = updated
         if let png = pendingIconData, !png.isEmpty {
@@ -561,7 +593,7 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func removeInstance(_ id: UUID, clearWebsiteData: Bool = false) {
-        guard let idx = instances.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfInstance(id) else { return }
         let removed = instances.remove(at: idx)
         InstanceIconStore.removeIcon(for: id)
         inAppTabs.removeAll { $0.ownerInstanceID == id }
@@ -587,10 +619,12 @@ final class WorkspaceStore: ObservableObject {
 
     func moveInstances(from source: IndexSet, to destination: Int) {
         guard selectedSpaceID == nil else { return }
-        instances.move(fromOffsets: source, toOffset: destination)
-        for idx in instances.indices {
-            instances[idx].sortOrder = idx
+        var reordered = instances
+        reordered.move(fromOffsets: source, toOffset: destination)
+        for idx in reordered.indices {
+            reordered[idx].sortOrder = idx
         }
+        instances = reordered
         save()
     }
 
@@ -686,8 +720,14 @@ final class WorkspaceStore: ObservableObject {
 
     func removeSpace(_ spaceID: UUID) {
         spaces.removeAll { $0.id == spaceID }
-        for idx in instances.indices where instances[idx].spaceID == spaceID {
-            instances[idx].spaceID = nil
+        var updatedInstances = instances
+        var changed = false
+        for idx in updatedInstances.indices where updatedInstances[idx].spaceID == spaceID {
+            updatedInstances[idx].spaceID = nil
+            changed = true
+        }
+        if changed {
+            instances = updatedInstances
         }
         if selectedSpaceID == spaceID {
             selectedSpaceID = nil
@@ -842,7 +882,7 @@ final class WorkspaceStore: ObservableObject {
 
     @discardableResult
     func exportDedicatedDesktopApp(for instanceID: UUID, launchAfterExport: Bool = false, pinToDock: Bool = false) throws -> URL {
-        guard let idx = instances.firstIndex(where: { $0.id == instanceID }) else {
+        guard let idx = indexOfInstance(instanceID) else {
             throw DedicatedAppBuildError.packagingFailed("Không tìm thấy cấu hình ứng dụng.")
         }
         let appURL = try DedicatedAppBuilder.exportDedicatedApp(
