@@ -19,7 +19,6 @@ private struct SidebarVibrancyBackground: NSViewRepresentable {
 
 struct MainWorkspaceView: View {
     @ObservedObject var store = WorkspaceStore.shared
-    @ObservedObject var sessionManager = WebSessionManager.shared
     @ObservedObject var updater = UpdateCheckerService.shared
 
     private var sidebarVisibilityBinding: Binding<NavigationSplitViewVisibility> {
@@ -62,7 +61,7 @@ struct MainWorkspaceView: View {
         ZStack {
             if store.isStandaloneMode {
                 NavigationStack {
-                    detailPaneView
+                    WorkspaceDetailPaneView()
                 }
             } else {
                 NavigationSplitView(columnVisibility: sidebarVisibilityBinding) {
@@ -76,7 +75,7 @@ struct MainWorkspaceView: View {
                             Divider()
                         }
 
-                        detailPaneView
+                        WorkspaceDetailPaneView()
                     }
                 }
                 .navigationSplitViewStyle(.balanced)
@@ -215,10 +214,17 @@ struct MainWorkspaceView: View {
         let indexByID = Dictionary(
             uniqueKeysWithValues: visibleInstances.enumerated().map { ($0.element.id, $0.offset) }
         )
+        let showLabels = store.preferences.showAccountLabelsInSidebar
+        let splitSecondaryID = store.secondarySplitInstanceID
         return List(selection: activeSelectionBinding) {
             Section {
                 ForEach(visibleInstances) { instance in
-                    sidebarAccountRow(instance: instance, shortcutIndex: indexByID[instance.id])
+                    SidebarAccountRowView(
+                        instance: instance,
+                        shortcutIndex: indexByID[instance.id],
+                        showAccountLabel: showLabels,
+                        isSplitSecondary: splitSecondaryID == instance.id
+                    )
                 }
                 .onMove { source, destination in
                     store.moveInstances(from: source, to: destination)
@@ -313,75 +319,6 @@ struct MainWorkspaceView: View {
         .help(L10n.filterBySpace)
     }
 
-    private func sidebarAccountRow(instance: WebAppInstance, shortcutIndex: Int?) -> some View {
-        let rtState = sessionManager.state(for: instance.id)
-        let isSplitSecondary = store.secondarySplitInstanceID == instance.id
-
-        return HStack(spacing: 10) {
-            AppInstanceAvatarView(instance: instance, size: 28, showBadgePill: true)
-                .opacity(rtState.isHibernated ? 0.55 : 1.0)
-
-            VStack(alignment: .leading, spacing: 1.5) {
-                HStack(spacing: 4) {
-                    Text(instance.name)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-
-                    if instance.notificationsMuted {
-                        Image(systemName: "bell.slash.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if store.preferences.showAccountLabelsInSidebar {
-                    let subtitle = instance.accountLabel.isEmpty
-                        ? (instance.baseURL.host ?? "")
-                        : instance.accountLabel
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            if rtState.unreadCount > 0 {
-                Text(rtState.unreadCount > 99 ? "99+" : "\(rtState.unreadCount)")
-                    .font(.caption2.weight(.bold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1.5)
-                    .background(Capsule().fill(Color.red))
-            } else if rtState.hasUnreadDot {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-            } else if isSplitSecondary {
-                Image(systemName: "rectangle.split.2x1.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if rtState.isHibernated {
-                Image(systemName: "moon.zzz")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else if let idx = shortcutIndex, idx < 9 {
-                Text("⌘\(idx + 1)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 3)
-        .contentShape(Rectangle())
-        .help(instance.displayTitle)
-        .contextMenu {
-            instanceContextMenu(for: instance, rtState: rtState)
-        }
-    }
-
     // Native macOS Bottom Action Bar inside Full Sidebar
     private var sidebarBottomBar: some View {
         VStack(spacing: 0) {
@@ -465,9 +402,16 @@ struct MainWorkspaceView: View {
 
             // Scrollable App Icons Column
             ScrollView(.vertical, showsIndicators: false) {
+                let activeID = store.activeInstance?.id
+                let splitSecondaryID = store.secondarySplitInstanceID
                 LazyVStack(spacing: 8) {
                     ForEach(Array(store.filteredInstances.enumerated()), id: \.element.id) { index, instance in
-                        compactAccountIconCell(instance: instance, index: index)
+                        CompactAccountIconCellView(
+                            instance: instance,
+                            index: index,
+                            isActive: activeID == instance.id,
+                            isSplitSecondary: splitSecondaryID == instance.id
+                        )
                     }
                 }
                 .padding(.vertical, 10)
@@ -520,68 +464,6 @@ struct MainWorkspaceView: View {
         .background(SidebarVibrancyBackground())
     }
 
-    private func compactAccountIconCell(instance: WebAppInstance, index: Int) -> some View {
-        let isActive = store.activeInstance?.id == instance.id
-        let isSplitSecondary = store.secondarySplitInstanceID == instance.id
-        let rtState = sessionManager.state(for: instance.id)
-        let shortcutHint = index < 9 ? " (⌘\(index + 1))" : ""
-
-        return ZStack(alignment: .leading) {
-            // Active Accent Bar on Left Edge
-            if isActive {
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(width: 3.5, height: 22)
-                    .offset(x: 2)
-            } else if isSplitSecondary {
-                Capsule()
-                    .fill(Color.blue.opacity(0.65))
-                    .frame(width: 3, height: 14)
-                    .offset(x: 2)
-            }
-
-            HStack {
-                Spacer(minLength: 0)
-
-                ZStack(alignment: .topTrailing) {
-                    AppInstanceAvatarView(instance: instance, size: 38, showBadgePill: true)
-                        .opacity(rtState.isHibernated ? 0.55 : 1.0)
-                        .padding(5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .fill(isActive ? Color.accentColor.opacity(0.16) : Color.clear)
-                        )
-
-                    if rtState.unreadCount > 0 {
-                        Text(rtState.unreadCount > 99 ? "99+" : "\(rtState.unreadCount)")
-                            .font(.system(size: 9.5, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4.5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.red))
-                            .offset(x: 3, y: -1)
-                    } else if rtState.hasUnreadDot {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 9, height: 9)
-                            .offset(x: 1, y: 0)
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-        }
-        .frame(width: 64, height: 48)
-        .contentShape(Rectangle())
-        .help("\(instance.displayTitle)\(shortcutHint)")
-        .onTapGesture {
-            store.selectInstance(instance.id)
-        }
-        .contextMenu {
-            instanceContextMenu(for: instance, rtState: rtState)
-        }
-    }
-
     @ViewBuilder
     private var sidebarUpdateStatusControl: some View {
         switch updater.state {
@@ -614,13 +496,262 @@ struct MainWorkspaceView: View {
             .help(L10n.checkForUpdatesTooltip)
         }
     }
+}
 
-    // MARK: - Detail Column & Unified macOS Toolbar
+// MARK: - Isolated Sidebar Row & Compact Rail Cell Views (Scoped Observation per Account)
 
-    @ViewBuilder
-    private var detailPaneView: some View {
+private struct SidebarAccountRowView: View {
+    let instance: WebAppInstance
+    let shortcutIndex: Int?
+    let showAccountLabel: Bool
+    let isSplitSecondary: Bool
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let runtime = sessionManager.runtime(for: instance.id)
+
+        HStack(spacing: 10) {
+            AppInstanceAvatarView(instance: instance, size: 28, showBadgePill: true)
+                .opacity(runtime.isHibernated ? 0.55 : 1.0)
+
+            VStack(alignment: .leading, spacing: 1.5) {
+                HStack(spacing: 4) {
+                    Text(instance.name)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
+
+                    if instance.notificationsMuted {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if showAccountLabel {
+                    let subtitle = instance.accountLabel.isEmpty
+                        ? (instance.baseURL.host ?? "")
+                        : instance.accountLabel
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if runtime.unreadCount > 0 {
+                Text(runtime.unreadCount > 99 ? "99+" : "\(runtime.unreadCount)")
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(Color.red))
+            } else if runtime.hasUnreadDot {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+            } else if isSplitSecondary {
+                Image(systemName: "rectangle.split.2x1.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if runtime.isHibernated {
+                Image(systemName: "moon.zzz")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if let idx = shortcutIndex, idx < 9 {
+                Text("⌘\(idx + 1)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .help(instance.displayTitle)
+        .contextMenu {
+            InstanceAccountContextMenuItems(instance: instance, runtime: runtime)
+        }
+    }
+}
+
+private struct CompactAccountIconCellView: View {
+    let instance: WebAppInstance
+    let index: Int
+    let isActive: Bool
+    let isSplitSecondary: Bool
+    private let store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let runtime = sessionManager.runtime(for: instance.id)
+        let shortcutHint = index < 9 ? " (⌘\(index + 1))" : ""
+
+        ZStack(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3.5, height: 22)
+                    .offset(x: 2)
+            } else if isSplitSecondary {
+                Capsule()
+                    .fill(Color.blue.opacity(0.65))
+                    .frame(width: 3, height: 14)
+                    .offset(x: 2)
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+
+                ZStack(alignment: .topTrailing) {
+                    AppInstanceAvatarView(instance: instance, size: 38, showBadgePill: true)
+                        .opacity(runtime.isHibernated ? 0.55 : 1.0)
+                        .padding(5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(isActive ? Color.accentColor.opacity(0.16) : Color.clear)
+                        )
+
+                    if runtime.unreadCount > 0 {
+                        Text(runtime.unreadCount > 99 ? "99+" : "\(runtime.unreadCount)")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4.5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red))
+                            .offset(x: 3, y: -1)
+                    } else if runtime.hasUnreadDot {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 9, height: 9)
+                            .offset(x: 1, y: 0)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(width: 64, height: 48)
+        .contentShape(Rectangle())
+        .help("\(instance.displayTitle)\(shortcutHint)")
+        .onTapGesture {
+            store.selectInstance(instance.id)
+        }
+        .contextMenu {
+            InstanceAccountContextMenuItems(instance: instance, runtime: runtime)
+        }
+    }
+}
+
+private struct InstanceAccountContextMenuItems: View {
+    let instance: WebAppInstance
+    let runtime: InstanceRuntimeModel
+    @ObservedObject var store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        Button {
+            store.addAnotherAccount(basedOn: instance)
+        } label: {
+            Label(L10n.ctxAddAnotherAccount(instance.name), systemImage: "person.crop.circle.badge.plus")
+        }
+
+        Divider()
+
+        Button {
+            sessionManager.openDetachedWindow(for: instance)
+        } label: {
+            Label(L10n.ctxDetachWindow, systemImage: "macwindow.on.rectangle")
+        }
+
+        if store.activeInstanceID != instance.id {
+            Button {
+                if store.secondarySplitInstanceID == instance.id {
+                    store.secondarySplitInstanceID = nil
+                } else {
+                    store.secondarySplitInstanceID = instance.id
+                }
+            } label: {
+                Label(
+                    store.secondarySplitInstanceID == instance.id
+                        ? L10n.ctxCloseSideBySide
+                        : L10n.ctxOpenSideBySide,
+                    systemImage: "rectangle.split.2x1"
+                )
+            }
+        }
+
+        Button {
+            _ = try? store.exportDedicatedDesktopApp(for: instance.id, launchAfterExport: false, pinToDock: false)
+        } label: {
+            Label(L10n.ctxExportDedicatedApp, systemImage: "app.badge.checkmark")
+        }
+
+        Divider()
+
+        Button {
+            sessionManager.reload(instanceID: instance.id)
+        } label: {
+            Label(L10n.ctxReloadPage, systemImage: "arrow.clockwise")
+        }
+
+        Button {
+            Task { @MainActor in
+                if let png = await AppIconFetcher.shared.fetchBestIcon(
+                    catalogID: instance.catalogID,
+                    appName: instance.name,
+                    siteURL: instance.baseURL
+                ) {
+                    store.updateIconSilently(instanceID: instance.id, pngData: png)
+                    store.showToast(L10n.iconUpdatedToast(instance.name))
+                }
+            }
+        } label: {
+            Label(L10n.ctxRefetchIcon, systemImage: "sparkles")
+        }
+
+        if runtime.isHibernated {
+            Button {
+                sessionManager.wakeInstance(instance)
+            } label: {
+                Label(L10n.ctxWakeAccount, systemImage: "bolt.fill")
+            }
+        } else {
+            Button {
+                sessionManager.hibernateInstance(instance.id)
+            } label: {
+                Label(L10n.ctxHibernateAccount, systemImage: "moon.zzz.fill")
+            }
+        }
+
+        Button {
+            store.editingInstance = instance
+        } label: {
+            Label(L10n.ctxCustomizeAccount, systemImage: "slider.horizontal.3")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            store.removeInstance(instance.id, clearWebsiteData: true)
+        } label: {
+            Label(L10n.ctxDeleteAccount, systemImage: "trash")
+        }
+    }
+}
+
+// MARK: - Detail Column & Unified macOS Toolbar
+
+private struct WorkspaceDetailPaneView: View {
+    @ObservedObject var store = WorkspaceStore.shared
+    @ObservedObject var updater = UpdateCheckerService.shared
+    private let sessionManager = WebSessionManager.shared
+    private let downloadStore = DownloadStore.shared
+
+    var body: some View {
         if let active = store.activeInstance {
-            let rtState = sessionManager.state(for: active.id)
+            let runtime = sessionManager.runtime(for: active.id)
             VStack(spacing: 0) {
                 if store.isFindBarVisible {
                     findInPageBar
@@ -630,10 +761,10 @@ struct MainWorkspaceView: View {
                 mainContentArea(activeInstance: active)
             }
             .navigationTitle(active.displayTitle)
-            .navigationSubtitle(rtState.currentURL?.host ?? active.baseURL.host ?? "")
+            .navigationSubtitle(runtime.currentURL?.host ?? active.baseURL.host ?? "")
             .toolbar {
                 if !store.isStandaloneMode || store.showStandaloneToolbar {
-                    unifiedToolbarContent(for: active, rtState: rtState)
+                    unifiedToolbarContent(for: active, runtime: runtime)
                 }
             }
         } else {
@@ -643,14 +774,9 @@ struct MainWorkspaceView: View {
     }
 
     @ToolbarContentBuilder
-    private func unifiedToolbarContent(for active: WebAppInstance, rtState: InstanceRuntimeState) -> some ToolbarContent {
+    private func unifiedToolbarContent(for active: WebAppInstance, runtime: InstanceRuntimeModel) -> some ToolbarContent {
         let effectiveLinkMode = store.effectiveLinkRoutingMode(for: active)
         let openTabsCount = store.visibleInAppTabs.count
-        let backgroundHasUnread = store.instances.contains { item in
-            guard item.id != active.id else { return false }
-            let st = sessionManager.state(for: item.id)
-            return st.unreadCount > 0 || st.hasUnreadDot
-        }
 
         // Left / Navigation Cluster
         ToolbarItemGroup(placement: .navigation) {
@@ -674,7 +800,7 @@ struct MainWorkspaceView: View {
             } label: {
                 Image(systemName: "chevron.left")
             }
-            .disabled(!rtState.canGoBack)
+            .disabled(!runtime.canGoBack)
             .help(L10n.goBackTooltip)
 
             Button {
@@ -682,7 +808,7 @@ struct MainWorkspaceView: View {
             } label: {
                 Image(systemName: "chevron.right")
             }
-            .disabled(!rtState.canGoForward)
+            .disabled(!runtime.canGoForward)
             .help(L10n.goForwardTooltip)
 
             Button {
@@ -701,51 +827,7 @@ struct MainWorkspaceView: View {
 
             // Quick Account Switcher right in the toolbar when Left Sidebar is completely hidden!
             if !store.isStandaloneMode && !store.preferences.isSidebarVisible {
-                Menu {
-                    Section(L10n.quickSwitchAccount) {
-                        ForEach(Array(store.filteredInstances.enumerated()), id: \.element.id) { idx, item in
-                            let itemState = sessionManager.state(for: item.id)
-                            let unreadSuffix = itemState.unreadCount > 0
-                                ? " (\(itemState.unreadCount))"
-                                : (itemState.hasUnreadDot ? " •" : "")
-                            Button {
-                                store.selectInstance(item.id)
-                            } label: {
-                                HStack {
-                                    Text("\(idx < 9 ? "⌘\(idx + 1)  " : "")\(item.displayTitle)\(unreadSuffix)")
-                                    if item.id == active.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        store.setSidebarDisplayMode(.compactIcons)
-                    } label: {
-                        Label(L10n.sidebarCollapseTooltip, systemImage: "sidebar.squares.leading")
-                    }
-
-                    Button {
-                        store.setSidebarDisplayMode(.expanded)
-                    } label: {
-                        Label(L10n.sidebarToggleFullTooltip, systemImage: "sidebar.leading")
-                    }
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        AppInstanceAvatarView(instance: active, size: 20, showBadgePill: false)
-                        if backgroundHasUnread {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 7, height: 7)
-                                .offset(x: 3, y: -2)
-                        }
-                    }
-                }
-                .help(L10n.quickSwitchWhenHidden)
+                QuickSwitchAccountToolbarMenu(active: active)
             }
         }
 
@@ -857,8 +939,8 @@ struct MainWorkspaceView: View {
                 .help(L10n.splitScreenTooltip)
             }
 
-            // Downloads Popover (Always accessible once downloads occur, or configure in Settings)
-            if !sessionManager.downloads.isEmpty {
+            // Downloads Popover (Observes only Bool presence; DownloadsPopoverView observes item progress)
+            if downloadStore.hasDownloads {
                 Button {
                     store.isDownloadsPopoverShown.toggle()
                 } label: {
@@ -866,13 +948,13 @@ struct MainWorkspaceView: View {
                         .foregroundStyle(.blue)
                 }
                 .popover(isPresented: $store.isDownloadsPopoverShown) {
-                    downloadsPopoverView
+                    DownloadsPopoverView()
                 }
                 .help(L10n.downloadsTooltip)
             }
 
             // Open Current URL in External Browser
-            if let currentURL = rtState.currentURL {
+            if let currentURL = runtime.currentURL {
                 Button {
                     LinkRouter.openInExternalBrowser(
                         currentURL,
@@ -891,99 +973,6 @@ struct MainWorkspaceView: View {
                 Image(systemName: "slider.horizontal.3")
             }
             .help(L10n.accountSettingsTooltip)
-        }
-    }
-
-    // MARK: - Context Menu
-
-    @ViewBuilder
-    private func instanceContextMenu(for instance: WebAppInstance, rtState: InstanceRuntimeState) -> some View {
-        Button {
-            store.addAnotherAccount(basedOn: instance)
-        } label: {
-            Label(L10n.ctxAddAnotherAccount(instance.name), systemImage: "person.crop.circle.badge.plus")
-        }
-
-        Divider()
-
-        Button {
-            sessionManager.openDetachedWindow(for: instance)
-        } label: {
-            Label(L10n.ctxDetachWindow, systemImage: "macwindow.on.rectangle")
-        }
-
-        if store.activeInstanceID != instance.id {
-            Button {
-                if store.secondarySplitInstanceID == instance.id {
-                    store.secondarySplitInstanceID = nil
-                } else {
-                    store.secondarySplitInstanceID = instance.id
-                }
-            } label: {
-                Label(
-                    store.secondarySplitInstanceID == instance.id
-                        ? L10n.ctxCloseSideBySide
-                        : L10n.ctxOpenSideBySide,
-                    systemImage: "rectangle.split.2x1"
-                )
-            }
-        }
-
-        Button {
-            _ = try? store.exportDedicatedDesktopApp(for: instance.id, launchAfterExport: false, pinToDock: false)
-        } label: {
-            Label(L10n.ctxExportDedicatedApp, systemImage: "app.badge.checkmark")
-        }
-
-        Divider()
-
-        Button {
-            sessionManager.reload(instanceID: instance.id)
-        } label: {
-            Label(L10n.ctxReloadPage, systemImage: "arrow.clockwise")
-        }
-
-        Button {
-            Task { @MainActor in
-                if let png = await AppIconFetcher.shared.fetchBestIcon(
-                    catalogID: instance.catalogID,
-                    appName: instance.name,
-                    siteURL: instance.baseURL
-                ) {
-                    store.updateIconSilently(instanceID: instance.id, pngData: png)
-                    store.showToast(L10n.iconUpdatedToast(instance.name))
-                }
-            }
-        } label: {
-            Label(L10n.ctxRefetchIcon, systemImage: "sparkles")
-        }
-
-        if rtState.isHibernated {
-            Button {
-                sessionManager.wakeInstance(instance)
-            } label: {
-                Label(L10n.ctxWakeAccount, systemImage: "bolt.fill")
-            }
-        } else {
-            Button {
-                sessionManager.hibernateInstance(instance.id)
-            } label: {
-                Label(L10n.ctxHibernateAccount, systemImage: "moon.zzz.fill")
-            }
-        }
-
-        Button {
-            store.editingInstance = instance
-        } label: {
-            Label(L10n.ctxCustomizeAccount, systemImage: "slider.horizontal.3")
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
-            store.removeInstance(instance.id, clearWebsiteData: true)
-        } label: {
-            Label(L10n.ctxDeleteAccount, systemImage: "trash")
         }
     }
 
@@ -1085,16 +1074,108 @@ struct MainWorkspaceView: View {
         .background(.bar)
     }
 
-    // MARK: - Downloads Popover (Click Row -> Reveal in Finder + Quick Folder Config)
+    // MARK: - Empty Workspace Welcome View
 
-    private var downloadsPopoverView: some View {
+    private var emptyWorkspaceWelcomeView: some View {
+        ContentUnavailableView {
+            Label(L10n.welcomeTitle, systemImage: "macwindow.on.rectangle")
+        } description: {
+            Text(L10n.welcomeDescription)
+        } actions: {
+            Button {
+                store.isCatalogPresented = true
+            } label: {
+                Label(L10n.welcomeAddAppButton, systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct QuickSwitchAccountToolbarMenu: View {
+    let active: WebAppInstance
+    @ObservedObject var store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let backgroundHasUnread = sessionManager.unreadSummary.backgroundHasUnread
+
+        Menu {
+            Section(L10n.quickSwitchAccount) {
+                ForEach(Array(store.filteredInstances.enumerated()), id: \.element.id) { idx, item in
+                    QuickSwitchAccountMenuRow(item: item, idx: idx, isActive: item.id == active.id)
+                }
+            }
+
+            Divider()
+
+            Button {
+                store.setSidebarDisplayMode(.compactIcons)
+            } label: {
+                Label(L10n.sidebarCollapseTooltip, systemImage: "sidebar.squares.leading")
+            }
+
+            Button {
+                store.setSidebarDisplayMode(.expanded)
+            } label: {
+                Label(L10n.sidebarToggleFullTooltip, systemImage: "sidebar.leading")
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                AppInstanceAvatarView(instance: active, size: 20, showBadgePill: false)
+                if backgroundHasUnread {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 3, y: -2)
+                }
+            }
+        }
+        .help(L10n.quickSwitchWhenHidden)
+    }
+}
+
+private struct QuickSwitchAccountMenuRow: View {
+    let item: WebAppInstance
+    let idx: Int
+    let isActive: Bool
+    private let store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let itemRuntime = sessionManager.runtime(for: item.id)
+        let unreadSuffix = itemRuntime.unreadCount > 0
+            ? " (\(itemRuntime.unreadCount))"
+            : (itemRuntime.hasUnreadDot ? " •" : "")
+        Button {
+            store.selectInstance(item.id)
+        } label: {
+            HStack {
+                Text("\(idx < 9 ? "⌘\(idx + 1)  " : "")\(item.displayTitle)\(unreadSuffix)")
+                if isActive {
+                    Image(systemName: "checkmark")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Downloads Popover (Isolated Observation on DownloadStore.downloads)
+
+private struct DownloadsPopoverView: View {
+    @ObservedObject var store = WorkspaceStore.shared
+    private let downloadStore = DownloadStore.shared
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(L10n.downloadsPopoverTitle)
                     .font(.headline)
                 Spacer()
                 Button(L10n.clearList) {
-                    sessionManager.downloads.removeAll()
+                    downloadStore.clearAll()
                 }
                 .font(.caption)
                 .buttonStyle(.borderless)
@@ -1105,7 +1186,7 @@ struct MainWorkspaceView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(sessionManager.downloads) { item in
+                    ForEach(downloadStore.downloads) { item in
                         HStack(spacing: 10) {
                             Image(systemName: item.state == .completed ? "checkmark.circle.fill" : "arrow.down.circle")
                                 .foregroundStyle(item.state == .completed ? .green : .blue)
@@ -1189,25 +1270,6 @@ struct MainWorkspaceView: View {
         }
         .padding(14)
         .frame(width: 375)
-    }
-
-    // MARK: - Empty Workspace Welcome View
-
-    private var emptyWorkspaceWelcomeView: some View {
-        ContentUnavailableView {
-            Label(L10n.welcomeTitle, systemImage: "macwindow.on.rectangle")
-        } description: {
-            Text(L10n.welcomeDescription)
-        } actions: {
-            Button {
-                store.isCatalogPresented = true
-            } label: {
-                Label(L10n.welcomeAddAppButton, systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

@@ -447,7 +447,7 @@ struct InAppBrowserTab: Identifiable, Equatable {
     }
 }
 
-struct DownloadTaskItem: Identifiable {
+struct DownloadTaskItem: Identifiable, Equatable {
     let id: UUID
     let sourceInstanceTitle: String
     var filename: String

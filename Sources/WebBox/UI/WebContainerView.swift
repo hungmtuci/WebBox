@@ -53,39 +53,23 @@ final class WebHostWrapperNSView: NSView {
 /// Complete pane for one WebAppInstance (handles Active WebView, Hibernated state, and Detached Window state).
 struct InstanceWebPaneView: View {
     let instance: WebAppInstance
-    @ObservedObject var sessionManager = WebSessionManager.shared
-    @ObservedObject var store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
 
     var body: some View {
-        let state = sessionManager.state(for: instance.id)
+        let runtime = sessionManager.runtime(for: instance.id)
 
         ZStack(alignment: .top) {
-            if state.isDetachedInWindow {
+            if runtime.isDetachedInWindow {
                 detachedPlaceholderView
-            } else if state.isHibernated {
+            } else if runtime.isHibernated {
                 hibernatedPlaceholderView
             } else {
                 HostedWebViewContainer(webView: sessionManager.webView(for: instance))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            if state.isLoading && !state.isHibernated && !state.isDetachedInWindow {
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(hex: instance.accentHex), .cyan],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(
-                            width: max(24, geo.size.width * max(0.08, state.estimatedProgress)),
-                            height: 2.5
-                        )
-                        .animation(.easeOut(duration: 0.18), value: state.estimatedProgress)
-                }
-                .frame(height: 2.5)
+            if runtime.isLoading && !runtime.isHibernated && !runtime.isDetachedInWindow {
+                WebPaneLoadingBarView(accentHex: instance.accentHex, runtime: runtime)
             }
         }
     }
@@ -160,5 +144,29 @@ struct InstanceWebPaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .underPageBackgroundColor))
+    }
+}
+
+private struct WebPaneLoadingBarView: View {
+    let accentHex: String
+    let runtime: InstanceRuntimeModel
+
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: accentHex), .cyan],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(
+                    width: max(24, geo.size.width * max(0.08, runtime.estimatedProgress)),
+                    height: 2.5
+                )
+                .animation(.easeOut(duration: 0.18), value: runtime.estimatedProgress)
+        }
+        .frame(height: 2.5)
     }
 }

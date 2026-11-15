@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Observation
 import WebKit
 import UserNotifications
 
@@ -525,19 +526,163 @@ final class WebBoxWKWebView: WKWebView {
     }
 }
 
-// MARK: - Runtime State Snapshot Per Instance
+// MARK: - Per-Instance Observable Runtime Model, Unread Summary & Download Store
 
-struct InstanceRuntimeState: Equatable {
-    var currentURL: URL?
-    var pageTitle: String = ""
-    var isLoading: Bool = false
-    var estimatedProgress: Double = 0
-    var canGoBack: Bool = false
-    var canGoForward: Bool = false
-    var unreadCount: Int = 0
-    var hasUnreadDot: Bool = false
-    var isHibernated: Bool = false
-    var isDetachedInWindow: Bool = false
+@MainActor
+@Observable
+final class InstanceRuntimeModel {
+    private(set) var currentURL: URL?
+    @ObservationIgnored fileprivate(set) var pageTitle: String = ""
+    private(set) var isLoading: Bool = false
+    private(set) var estimatedProgress: Double = 0
+    private(set) var canGoBack: Bool = false
+    private(set) var canGoForward: Bool = false
+    private(set) var unreadCount: Int = 0
+    private(set) var hasUnreadDot: Bool = false
+    private(set) var isHibernated: Bool = false
+    private(set) var isDetachedInWindow: Bool = false
+
+    func updateLoading(_ loading: Bool) {
+        if isLoading != loading {
+            isLoading = loading
+        }
+    }
+
+    func updateEstimatedProgress(_ progress: Double) {
+        if estimatedProgress != progress {
+            estimatedProgress = progress
+        }
+    }
+
+    func updateNavigation(url: URL?, canGoBack: Bool, canGoForward: Bool) {
+        if currentURL != url {
+            currentURL = url
+        }
+        if self.canGoBack != canGoBack {
+            self.canGoBack = canGoBack
+        }
+        if self.canGoForward != canGoForward {
+            self.canGoForward = canGoForward
+        }
+    }
+
+    func setCurrentURL(_ url: URL?) {
+        if currentURL != url {
+            currentURL = url
+        }
+    }
+
+    /// Stores pageTitle internally without notifying SwiftUI views, and updates unread indicators only if changed.
+    @discardableResult
+    func updateTitleAndUnread(title: String, count: Int, hasDot: Bool) -> Bool {
+        pageTitle = title
+        var changed = false
+        if unreadCount != count {
+            unreadCount = count
+            changed = true
+        }
+        let nextDot: Bool
+        if !hasDot && count == 0 {
+            nextDot = false
+        } else if hasDot {
+            nextDot = true
+        } else {
+            nextDot = hasUnreadDot
+        }
+        if hasUnreadDot != nextDot {
+            hasUnreadDot = nextDot
+            changed = true
+        }
+        return changed
+    }
+
+    @discardableResult
+    func markUnreadDotIfZeroCount() -> Bool {
+        guard unreadCount == 0, !hasUnreadDot else { return false }
+        hasUnreadDot = true
+        return true
+    }
+
+    func setHibernated(_ hibernated: Bool) {
+        if isHibernated != hibernated {
+            isHibernated = hibernated
+        }
+        if hibernated && isLoading {
+            isLoading = false
+        }
+    }
+
+    func setDetachedInWindow(_ detached: Bool) {
+        if isDetachedInWindow != detached {
+            isDetachedInWindow = detached
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class UnreadBadgeSummary {
+    private(set) var totalUnread: Int = 0
+    private(set) var anyDot: Bool = false
+    private(set) var backgroundHasUnread: Bool = false
+
+    fileprivate func update(totalUnread: Int, anyDot: Bool, backgroundHasUnread: Bool) {
+        if self.totalUnread != totalUnread {
+            self.totalUnread = totalUnread
+        }
+        if self.anyDot != anyDot {
+            self.anyDot = anyDot
+        }
+        if self.backgroundHasUnread != backgroundHasUnread {
+            self.backgroundHasUnread = backgroundHasUnread
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class DownloadStore {
+    static let shared = DownloadStore()
+
+    private(set) var downloads: [DownloadTaskItem] = []
+    private(set) var hasDownloads: Bool = false
+
+    private init() {}
+
+    func upsert(_ item: DownloadTaskItem) {
+        if let idx = downloads.firstIndex(where: { $0.id == item.id }) {
+            if downloads[idx] != item {
+                downloads[idx] = item
+            }
+        } else {
+            downloads.insert(item, at: 0)
+            if downloads.count > 100 {
+                downloads.removeLast(downloads.count - 100)
+            }
+            if !hasDownloads {
+                hasDownloads = true
+            }
+        }
+    }
+
+    func remove(id: UUID) {
+        let countBefore = downloads.count
+        downloads.removeAll { $0.id == id }
+        if downloads.count != countBefore {
+            let nextHasDownloads = !downloads.isEmpty
+            if hasDownloads != nextHasDownloads {
+                hasDownloads = nextHasDownloads
+            }
+        }
+    }
+
+    func clearAll() {
+        guard !downloads.isEmpty else { return }
+        downloads.removeAll()
+        if hasDownloads {
+            hasDownloads = false
+        }
+    }
 }
 
 // MARK: - Deferred Popup Catcher (Catches JS `const w = window.open(); w.location = url`)
@@ -715,12 +860,12 @@ private final class AuthPopupWindow: NSObject, NSWindowDelegate, WKUIDelegate, W
 // MARK: - WebSessionManager
 
 @MainActor
-final class WebSessionManager: NSObject, ObservableObject {
+final class WebSessionManager: NSObject {
     static let shared = WebSessionManager()
 
-    @Published private(set) var runtimeStates: [UUID: InstanceRuntimeState] = [:]
-    @Published var downloads: [DownloadTaskItem] = []
+    let unreadSummary = UnreadBadgeSummary()
 
+    private var runtimeModels: [UUID: InstanceRuntimeModel] = [:]
     private var instanceControllers: [UUID: InstanceWebController] = [:]
     private var inAppTabControllers: [UUID: InAppTabWebController] = [:]
     private var detachedWindows: [UUID: DetachedInstanceWindow] = [:]
@@ -780,9 +925,31 @@ final class WebSessionManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(req)
     }
 
-    func refreshDockBadge() {
-        let totalUnread = runtimeStates.values.reduce(0) { $0 + $1.unreadCount }
-        let anyDot = runtimeStates.values.contains { $0.hasUnreadDot }
+    func refreshUnreadSummary() {
+        refreshUnreadSummary(activeInstanceID: WorkspaceStore.shared.activeInstance?.id)
+    }
+
+    func refreshUnreadSummary(activeInstanceID activeID: UUID?) {
+        var totalUnread = 0
+        var anyDot = false
+        var backgroundHasUnread = false
+
+        for (id, model) in runtimeModels {
+            totalUnread += model.unreadCount
+            if model.hasUnreadDot {
+                anyDot = true
+            }
+            if id != activeID && (model.unreadCount > 0 || model.hasUnreadDot) {
+                backgroundHasUnread = true
+            }
+        }
+
+        unreadSummary.update(
+            totalUnread: totalUnread,
+            anyDot: anyDot,
+            backgroundHasUnread: backgroundHasUnread
+        )
+
         let nextBadge: String?
         if totalUnread > 0 {
             nextBadge = totalUnread > 99 ? "99+" : "\(totalUnread)"
@@ -798,8 +965,13 @@ final class WebSessionManager: NSObject, ObservableObject {
 
     // MARK: - Instance WebView Access & Lifecycle
 
-    func state(for instanceID: UUID) -> InstanceRuntimeState {
-        runtimeStates[instanceID] ?? InstanceRuntimeState()
+    func runtime(for instanceID: UUID) -> InstanceRuntimeModel {
+        if let existing = runtimeModels[instanceID] {
+            return existing
+        }
+        let created = InstanceRuntimeModel()
+        runtimeModels[instanceID] = created
+        return created
     }
 
     func markInstanceActive(_ instanceID: UUID) {
@@ -876,18 +1048,15 @@ final class WebSessionManager: NSObject, ObservableObject {
 
     func webView(for instance: WebAppInstance) -> WebBoxWKWebView {
         lastActiveTimestamps[instance.id] = CFAbsoluteTimeGetCurrent()
+        let rt = runtime(for: instance.id)
         if let existing = instanceControllers[instance.id] {
-            if runtimeStates[instance.id]?.isHibernated == true {
-                runtimeStates[instance.id]?.isHibernated = false
-            }
+            rt.setHibernated(false)
             return existing.webView
         }
         let controller = InstanceWebController(instance: instance, manager: self)
         instanceControllers[instance.id] = controller
-        var initial = runtimeStates[instance.id] ?? InstanceRuntimeState()
-        initial.isHibernated = false
-        initial.currentURL = instance.baseURL
-        runtimeStates[instance.id] = initial
+        rt.setHibernated(false)
+        rt.setCurrentURL(instance.baseURL)
         controller.loadInitialPage()
         return controller.webView
     }
@@ -954,18 +1123,15 @@ final class WebSessionManager: NSObject, ObservableObject {
             ctrl.teardown()
         }
         lastActiveTimestamps.removeValue(forKey: instanceID)
-        var st = runtimeStates[instanceID] ?? InstanceRuntimeState()
-        st.isHibernated = true
-        st.isLoading = false
-        runtimeStates[instanceID] = st
-        refreshDockBadge()
+        runtime(for: instanceID).setHibernated(true)
+        refreshUnreadSummary()
         if !silent {
             WorkspaceStore.shared.showToast("Đã chuyển tài khoản sang chế độ Ngủ đông (Giải phóng RAM)")
         }
     }
 
     func wakeInstance(_ instance: WebAppInstance) {
-        runtimeStates[instance.id]?.isHibernated = false
+        runtime(for: instance.id).setHibernated(false)
         _ = webView(for: instance)
     }
 
@@ -1004,8 +1170,8 @@ final class WebSessionManager: NSObject, ObservableObject {
             ctrl.teardown()
         }
         lastActiveTimestamps.removeValue(forKey: instanceID)
-        runtimeStates.removeValue(forKey: instanceID)
-        refreshDockBadge()
+        runtimeModels.removeValue(forKey: instanceID)
+        refreshUnreadSummary()
 
         if let profileID {
             Task { @MainActor in
@@ -1029,14 +1195,10 @@ final class WebSessionManager: NSObject, ObservableObject {
         let detached = DetachedInstanceWindow(instance: instance, webView: wv) { [weak self] closedID in
             guard let self else { return }
             self.detachedWindows.removeValue(forKey: closedID)
-            self.runtimeStates[closedID]?.isDetachedInWindow = false
-            self.objectWillChange.send()
+            self.runtime(for: closedID).setDetachedInWindow(false)
         }
         detachedWindows[instance.id] = detached
-        var st = runtimeStates[instance.id] ?? InstanceRuntimeState()
-        st.isDetachedInWindow = true
-        runtimeStates[instance.id] = st
-        objectWillChange.send()
+        runtime(for: instance.id).setDetachedInWindow(true)
     }
 
     func reattachWindowToWorkspace(instanceID: UUID) {
@@ -1138,10 +1300,7 @@ final class WebSessionManager: NSObject, ObservableObject {
             state: .completed,
             startedAt: Date()
         )
-        downloads.insert(item, at: 0)
-        if downloads.count > 100 {
-            downloads.removeLast(downloads.count - 100)
-        }
+        DownloadStore.shared.upsert(item)
         WorkspaceStore.shared.showToast("Đã tải xong: \(filename)", revealFileURL: destinationURL)
         postDownloadCompletedNotification(filename: filename, fileURL: destinationURL)
     }
@@ -1185,14 +1344,7 @@ final class WebSessionManager: NSObject, ObservableObject {
     }
 
     fileprivate func upsertDownloadItem(_ item: DownloadTaskItem, finished: Bool = false) {
-        if let idx = downloads.firstIndex(where: { $0.id == item.id }) {
-            downloads[idx] = item
-        } else {
-            downloads.insert(item, at: 0)
-            if downloads.count > 100 {
-                downloads.removeLast(downloads.count - 100)
-            }
-        }
+        DownloadStore.shared.upsert(item)
         if finished {
             activeDownloads.removeValue(forKey: item.id)
         }
@@ -1200,18 +1352,7 @@ final class WebSessionManager: NSObject, ObservableObject {
 
     fileprivate func cancelAndCleanupDownload(id: UUID) {
         activeDownloads.removeValue(forKey: id)
-        downloads.removeAll { $0.id == id }
-    }
-
-    fileprivate func updateRuntimeState(for id: UUID, mutate: (inout InstanceRuntimeState) -> Void) {
-        let previous = runtimeStates[id]
-        var current = previous ?? InstanceRuntimeState()
-        mutate(&current)
-        guard previous != current else { return }
-        runtimeStates[id] = current
-        if previous?.unreadCount != current.unreadCount || previous?.hasUnreadDot != current.hasUnreadDot {
-            refreshDockBadge()
-        }
+        DownloadStore.shared.remove(id: id)
     }
 }
 
@@ -1282,9 +1423,7 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
             webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.manager?.updateRuntimeState(for: self.instance.id) {
-                        $0.isLoading = wv.isLoading
-                    }
+                    self.manager?.runtime(for: self.instance.id).updateLoading(wv.isLoading)
                 }
             }
         )
@@ -1295,9 +1434,7 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
                     let p = wv.estimatedProgress
                     guard abs(p - self.lastReportedProgress) >= 0.03 || p <= 0.01 || p >= 0.99 else { return }
                     self.lastReportedProgress = p
-                    self.manager?.updateRuntimeState(for: self.instance.id) {
-                        $0.estimatedProgress = p
-                    }
+                    self.manager?.runtime(for: self.instance.id).updateEstimatedProgress(p)
                 }
             }
         )
@@ -1305,11 +1442,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
             webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.manager?.updateRuntimeState(for: self.instance.id) {
-                        $0.currentURL = wv.url
-                        $0.canGoBack = wv.canGoBack
-                        $0.canGoForward = wv.canGoForward
-                    }
+                    self.manager?.runtime(for: self.instance.id).updateNavigation(
+                        url: wv.url,
+                        canGoBack: wv.canGoBack,
+                        canGoForward: wv.canGoForward
+                    )
                 }
             }
         )
@@ -1334,14 +1471,8 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
             count = Int(title[digitRange]) ?? 0
         }
         let hasDot = count == 0 && (title.hasPrefix("•") || title.hasPrefix("●") || title.contains("tin nhắn mới"))
-        manager?.updateRuntimeState(for: instance.id) {
-            $0.pageTitle = title
-            $0.unreadCount = count
-            if !hasDot && count == 0 {
-                $0.hasUnreadDot = false
-            } else if hasDot {
-                $0.hasUnreadDot = true
-            }
+        if let manager, manager.runtime(for: instance.id).updateTitleAndUnread(title: title, count: count, hasDot: hasDot) {
+            manager.refreshUnreadSummary()
         }
     }
 
@@ -1383,12 +1514,10 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
             let title = (body["title"] as? String) ?? instance.name
             let text = (body["body"] as? String) ?? "Bạn có thông báo mới"
             manager?.postNativeNotification(title: title, body: text, instance: instance)
-            if WorkspaceStore.shared.activeInstanceID != instance.id {
-                manager?.updateRuntimeState(for: instance.id) {
-                    if $0.unreadCount == 0 {
-                        $0.hasUnreadDot = true
-                    }
-                }
+            if WorkspaceStore.shared.activeInstanceID != instance.id,
+               let manager,
+               manager.runtime(for: instance.id).markUnreadDotIfZeroCount() {
+                manager.refreshUnreadSummary()
             }
         default:
             break

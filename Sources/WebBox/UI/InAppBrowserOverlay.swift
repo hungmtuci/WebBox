@@ -3,7 +3,7 @@ import AppKit
 
 struct InAppBrowserPaneView: View {
     @ObservedObject var store = WorkspaceStore.shared
-    @ObservedObject var sessionManager = WebSessionManager.shared
+    private let sessionManager = WebSessionManager.shared
 
     private var tabs: [InAppBrowserTab] {
         store.visibleInAppTabs

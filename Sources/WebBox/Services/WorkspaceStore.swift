@@ -24,7 +24,13 @@ final class WorkspaceStore: ObservableObject {
 
     // Active navigation state
     @Published var selectedSpaceID: UUID? = nil // nil = Tất cả
-    @Published var activeInstanceID: UUID? = nil
+    @Published var activeInstanceID: UUID? = nil {
+        didSet {
+            if isLoaded, oldValue != activeInstanceID {
+                WebSessionManager.shared.refreshUnreadSummary(activeInstanceID: activeInstance?.id)
+            }
+        }
+    }
     @Published var secondarySplitInstanceID: UUID? = nil {
         didSet {
             if let id = secondarySplitInstanceID {
@@ -64,6 +70,7 @@ final class WorkspaceStore: ObservableObject {
     private let persistenceQueue = DispatchQueue(label: "com.hunglx.WebBox.persistence", qos: .utility)
     private var saveDebounceTask: Task<Void, Never>?
     private var hasPendingSave = false
+    private var isLoaded = false
     private var toastClearTask: Task<Void, Never>?
 
     private struct PersistedHubState: Codable, Sendable {
@@ -92,6 +99,7 @@ final class WorkspaceStore: ObservableObject {
             self.isStandaloneMode = false
             loadHubState()
         }
+        self.isLoaded = true
     }
 
     // MARK: - Persistence
