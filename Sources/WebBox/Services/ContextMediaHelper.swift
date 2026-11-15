@@ -297,6 +297,8 @@ enum ContextMediaExtractor {
             window.__webboxFindAnchor = findAnchor;
             window.__webboxFindMedia = findMediaElement;
 
+            let contextCleanupTimer = null;
+
             function recordContextHit(e) {
                 const a = findAnchor(e.target);
                 const imgInfo = findBestImage(e.target, e.clientX, e.clientY);
@@ -304,13 +306,21 @@ enum ContextMediaExtractor {
                 const linkHref = (a && a.href) ? String(a.href) : '';
                 const linkDownload = (a && a.getAttribute) ? String(a.getAttribute('download') || '') : '';
                 const mediaSrc = mediaEl ? String(mediaEl.currentSrc || mediaEl.src || '') : '';
+                const hasWeakRef = (typeof WeakRef === 'function');
 
-                window.__webboxLastContext = {
+                if (contextCleanupTimer) {
+                    clearTimeout(contextCleanupTimer);
+                    contextCleanupTimer = null;
+                }
+
+                const ctx = {
                     time: Date.now(),
                     x: e.clientX,
                     y: e.clientY,
-                    target: e.target,
-                    imgEl: imgInfo ? imgInfo.el : null,
+                    targetRef: (hasWeakRef && e.target && typeof e.target === 'object') ? new WeakRef(e.target) : null,
+                    imgElRef: (hasWeakRef && imgInfo && imgInfo.el) ? new WeakRef(imgInfo.el) : null,
+                    target: (!hasWeakRef && e.target) ? e.target : null,
+                    imgEl: (!hasWeakRef && imgInfo) ? imgInfo.el : null,
                     imgKind: imgInfo ? imgInfo.kind : '',
                     imgSrc: imgInfo ? imgInfo.src : '',
                     imgAlt: imgInfo ? imgInfo.alt : '',
@@ -318,6 +328,17 @@ enum ContextMediaExtractor {
                     linkDownload: linkDownload,
                     mediaSrc: mediaSrc
                 };
+                window.__webboxLastContext = ctx;
+
+                if (!hasWeakRef && (ctx.target || ctx.imgEl)) {
+                    contextCleanupTimer = setTimeout(function() {
+                        if (window.__webboxLastContext === ctx) {
+                            ctx.target = null;
+                            ctx.imgEl = null;
+                        }
+                        contextCleanupTimer = null;
+                    }, 5000);
+                }
 
                 post({
                     type: 'contextMenuHit',
@@ -401,15 +422,31 @@ enum ContextMediaExtractor {
         let src = fallbackSrc || '';
         let alt = '';
 
-        if (ctx && (Date.now() - (ctx.time || 0)) < 45000 && ctx.imgEl && ctx.imgEl.isConnected) {
-            el = ctx.imgEl;
-            kind = ctx.imgKind || (el.tagName ? el.tagName.toLowerCase() : 'img');
-            src = ctx.imgSrc || (el.currentSrc || el.src || src);
-            alt = ctx.imgAlt || el.alt || '';
+        if (ctx && (Date.now() - (ctx.time || 0)) < 45000) {
+            const candidateEl = (ctx.imgElRef && typeof ctx.imgElRef.deref === 'function')
+                ? ctx.imgElRef.deref()
+                : ctx.imgEl;
+            if (candidateEl && candidateEl.isConnected) {
+                el = candidateEl;
+                kind = ctx.imgKind || (el.tagName ? el.tagName.toLowerCase() : 'img');
+                src = ctx.imgSrc || (el.currentSrc || el.src || src);
+                alt = ctx.imgAlt || el.alt || '';
+            } else if (ctx.imgSrc) {
+                src = ctx.imgSrc;
+                alt = ctx.imgAlt || '';
+                kind = ctx.imgKind || 'img';
+            }
         }
 
         if (!el && typeof window.__webboxFindBestImage === 'function') {
-            const hit = window.__webboxFindBestImage(null, fallbackX, fallbackY);
+            const hitTarget = (ctx && ctx.targetRef && typeof ctx.targetRef.deref === 'function')
+                ? ctx.targetRef.deref()
+                : (ctx ? ctx.target : null);
+            const hit = window.__webboxFindBestImage(
+                (hitTarget && hitTarget.isConnected) ? hitTarget : null,
+                fallbackX,
+                fallbackY
+            );
             if (hit) {
                 el = hit.el;
                 kind = hit.kind;

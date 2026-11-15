@@ -1159,6 +1159,7 @@ final class WebSessionManager: NSObject {
         ctrl.instance = updated
         ctrl.webView.pageZoom = updated.pageZoom
         if old.baseURLString != updated.baseURLString {
+            ctrl.resetFaviconFallbackState()
             ctrl.webView.load(URLRequest(url: updated.baseURL))
         }
     }
@@ -1365,8 +1366,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
     let webView: WebBoxWKWebView
     private var observations: [NSKeyValueObservation] = []
     private var lastReportedProgress: Double = -1
+    private var faviconFallbackAttempts: Int = 0
+    private var isFaviconExtractionInFlight: Bool = false
 
     private static let bridgeHandlerName = "webboxBridge"
+    private static let maxFaviconFallbackAttempts: Int = 2
     private static let unreadTitleRegex = try? NSRegularExpression(pattern: #"^\s*[\(\[](\d+)\+?[\)\]]"#)
 
     init(instance: WebAppInstance, manager: WebSessionManager) {
@@ -1407,6 +1411,11 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
 
     func loadInitialPage() {
         webView.load(URLRequest(url: instance.baseURL))
+    }
+
+    func resetFaviconFallbackState() {
+        faviconFallbackAttempts = 0
+        isFaviconExtractionInFlight = false
     }
 
     func teardown() {
@@ -1599,8 +1608,14 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Fallback: If an internal/private site still has no icon, extract the live <link rel="icon"> URL from DOM
-        guard WorkspaceStore.shared.instance(for: instance.id)?.hasCustomIcon == false else { return }
+        // Fallback: If an internal/private site still has no icon, try extracting live <link rel="icon"> from DOM at most twice per controller session.
+        guard faviconFallbackAttempts < Self.maxFaviconFallbackAttempts,
+              !isFaviconExtractionInFlight,
+              WorkspaceStore.shared.instance(for: instance.id)?.hasCustomIcon == false else { return }
+
+        faviconFallbackAttempts += 1
+        isFaviconExtractionInFlight = true
+
         let js = """
         (function() {
             const links = Array.from(document.querySelectorAll('link[rel*="icon"]'));
@@ -1611,12 +1626,19 @@ private final class InstanceWebController: NSObject, WKNavigationDelegate, WKUID
         })();
         """
         let instID = instance.id
-        webView.evaluateJavaScript(js) { result, _ in
-            guard let href = result as? String, !href.isEmpty, let iconURL = URL(string: href) else { return }
-            Task { @MainActor in
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let href = result as? String, !href.isEmpty, let iconURL = URL(string: href) else {
+                Task { @MainActor [weak self] in
+                    self?.isFaviconExtractionInFlight = false
+                }
+                return
+            }
+            Task { @MainActor [weak self] in
+                defer { self?.isFaviconExtractionInFlight = false }
                 guard WorkspaceStore.shared.instance(for: instID)?.hasCustomIcon == false else { return }
                 if let png = await AppIconFetcher.shared.downloadAndNormalizeIcon(from: iconURL, minPixelDimension: 24) {
                     WorkspaceStore.shared.updateIconSilently(instanceID: instID, pngData: png)
+                    self?.faviconFallbackAttempts = Self.maxFaviconFallbackAttempts
                 }
             }
         }
