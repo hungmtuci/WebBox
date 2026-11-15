@@ -621,6 +621,55 @@ final class InstanceRuntimeModel {
 
 @MainActor
 @Observable
+final class InAppTabRuntimeModel {
+    private(set) var url: URL
+    private(set) var title: String
+    private(set) var isLoading: Bool = true
+    private(set) var estimatedProgress: Double = 0.1
+    private(set) var canGoBack: Bool = false
+    private(set) var canGoForward: Bool = false
+
+    init(initialURL: URL) {
+        self.url = initialURL
+        self.title = initialURL.host ?? initialURL.absoluteString
+    }
+
+    func updateURL(_ nextURL: URL?) {
+        guard let nextURL, url != nextURL else { return }
+        url = nextURL
+    }
+
+    func updateTitle(_ nextTitle: String?) {
+        guard let raw = nextTitle else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, title != trimmed else { return }
+        title = trimmed
+    }
+
+    func updateLoading(_ loading: Bool) {
+        if isLoading != loading {
+            isLoading = loading
+        }
+    }
+
+    func updateEstimatedProgress(_ progress: Double) {
+        if estimatedProgress != progress {
+            estimatedProgress = progress
+        }
+    }
+
+    func updateNavigationFlags(canGoBack back: Bool, canGoForward forward: Bool) {
+        if canGoBack != back {
+            canGoBack = back
+        }
+        if canGoForward != forward {
+            canGoForward = forward
+        }
+    }
+}
+
+@MainActor
+@Observable
 final class UnreadBadgeSummary {
     private(set) var totalUnread: Int = 0
     private(set) var anyDot: Bool = false
@@ -866,6 +915,7 @@ final class WebSessionManager: NSObject {
     let unreadSummary = UnreadBadgeSummary()
 
     private var runtimeModels: [UUID: InstanceRuntimeModel] = [:]
+    private var inAppTabRuntimeModels: [UUID: InAppTabRuntimeModel] = [:]
     private var instanceControllers: [UUID: InstanceWebController] = [:]
     private var inAppTabControllers: [UUID: InAppTabWebController] = [:]
     private var detachedWindows: [UUID: DetachedInstanceWindow] = [:]
@@ -1213,7 +1263,33 @@ final class WebSessionManager: NSObject {
 
     // MARK: - In-App Browser Tab WebViews
 
+    @discardableResult
+    func runtime(forTab tab: InAppBrowserTab) -> InAppTabRuntimeModel {
+        if let existing = inAppTabRuntimeModels[tab.id] {
+            return existing
+        }
+        let created = InAppTabRuntimeModel(initialURL: tab.initialURL)
+        inAppTabRuntimeModels[tab.id] = created
+        return created
+    }
+
+    func runtime(forTab tabID: UUID) -> InAppTabRuntimeModel {
+        if let existing = inAppTabRuntimeModels[tabID] {
+            return existing
+        }
+        let fallbackURL = WorkspaceStore.shared.inAppTabs.first(where: { $0.id == tabID })?.initialURL
+            ?? URL(string: "about:blank")!
+        let created = InAppTabRuntimeModel(initialURL: fallbackURL)
+        inAppTabRuntimeModels[tabID] = created
+        return created
+    }
+
+    fileprivate func existingRuntime(forTabID tabID: UUID) -> InAppTabRuntimeModel? {
+        inAppTabRuntimeModels[tabID]
+    }
+
     func inAppWebView(for tab: InAppBrowserTab) -> WebBoxWKWebView {
+        _ = runtime(forTab: tab)
         if let existing = inAppTabControllers[tab.id] {
             return existing.webView
         }
@@ -1224,6 +1300,7 @@ final class WebSessionManager: NSObject {
     }
 
     func navigateInAppTab(tabID: UUID, to url: URL) {
+        inAppTabRuntimeModels[tabID]?.updateURL(url)
         inAppTabControllers[tabID]?.webView.load(URLRequest(url: url))
     }
 
@@ -1243,6 +1320,7 @@ final class WebSessionManager: NSObject {
         if let ctrl = inAppTabControllers.removeValue(forKey: tabID) {
             ctrl.teardown()
         }
+        inAppTabRuntimeModels.removeValue(forKey: tabID)
     }
 
     // MARK: - OAuth Popup & Deferred Catcher Helpers
@@ -1803,6 +1881,7 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
     let webView: WebBoxWKWebView
     private var observations: [NSKeyValueObservation] = []
     private var lastReportedProgress: Double = -1
+    private var isTornDown: Bool = false
 
     private static let bridgeHandlerName = "webboxBridge"
 
@@ -1852,10 +1931,11 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
     }
 
     func loadInitial() {
-        webView.load(URLRequest(url: tab.currentURL))
+        webView.load(URLRequest(url: tab.initialURL))
     }
 
     func teardown() {
+        isTornDown = true
         observations.removeAll()
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.bridgeHandlerName)
@@ -1884,67 +1964,50 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         observations.append(
             webView.observe(\.url, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    WorkspaceStore.shared.updateInAppTabState(
-                        tabID: self.tab.id,
-                        url: wv.url,
-                        title: wv.title,
-                        isLoading: wv.isLoading,
-                        progress: wv.estimatedProgress,
-                        canGoBack: wv.canGoBack,
-                        canGoForward: wv.canGoForward
-                    )
+                    guard let self, !self.isTornDown,
+                          let rt = self.manager?.existingRuntime(forTabID: self.tab.id) else { return }
+                    rt.updateURL(wv.url)
+                    rt.updateTitle(wv.title)
+                    rt.updateLoading(wv.isLoading)
+                    rt.updateEstimatedProgress(wv.estimatedProgress)
+                    rt.updateNavigationFlags(canGoBack: wv.canGoBack, canGoForward: wv.canGoForward)
                 }
             }
         )
         observations.append(
             webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    WorkspaceStore.shared.updateInAppTabState(
-                        tabID: self.tab.id,
-                        url: wv.url,
-                        title: wv.title,
-                        isLoading: nil,
-                        progress: nil,
-                        canGoBack: wv.canGoBack,
-                        canGoForward: wv.canGoForward
-                    )
+                    guard let self, !self.isTornDown,
+                          let rt = self.manager?.existingRuntime(forTabID: self.tab.id) else { return }
+                    rt.updateURL(wv.url)
+                    rt.updateTitle(wv.title)
+                    rt.updateNavigationFlags(canGoBack: wv.canGoBack, canGoForward: wv.canGoForward)
                 }
             }
         )
         observations.append(
             webView.observe(\.isLoading, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    WorkspaceStore.shared.updateInAppTabState(
-                        tabID: self.tab.id,
-                        url: wv.url,
-                        title: wv.title,
-                        isLoading: wv.isLoading,
-                        progress: wv.estimatedProgress,
-                        canGoBack: wv.canGoBack,
-                        canGoForward: wv.canGoForward
-                    )
+                    guard let self, !self.isTornDown,
+                          let rt = self.manager?.existingRuntime(forTabID: self.tab.id) else { return }
+                    rt.updateURL(wv.url)
+                    rt.updateTitle(wv.title)
+                    rt.updateLoading(wv.isLoading)
+                    rt.updateEstimatedProgress(wv.estimatedProgress)
+                    rt.updateNavigationFlags(canGoBack: wv.canGoBack, canGoForward: wv.canGoForward)
                 }
             }
         )
         observations.append(
             webView.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, !self.isTornDown else { return }
                     let p = wv.estimatedProgress
                     guard abs(p - self.lastReportedProgress) >= 0.03 || p <= 0.01 || p >= 0.99 else { return }
                     self.lastReportedProgress = p
-                    WorkspaceStore.shared.updateInAppTabState(
-                        tabID: self.tab.id,
-                        url: nil,
-                        title: nil,
-                        isLoading: wv.isLoading,
-                        progress: p,
-                        canGoBack: nil,
-                        canGoForward: nil
-                    )
+                    guard let rt = self.manager?.existingRuntime(forTabID: self.tab.id) else { return }
+                    rt.updateLoading(wv.isLoading)
+                    rt.updateEstimatedProgress(p)
                 }
             }
         )
@@ -2031,6 +2094,13 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         }
     }
 
+    private var currentDialogTitle: String {
+        manager?.existingRuntime(forTabID: tab.id)?.title
+            ?? webView.title
+            ?? tab.initialURL.host
+            ?? "WebBox"
+    }
+
     func webView(
         _ webView: WKWebView,
         runJavaScriptAlertPanelWithMessage message: String,
@@ -2038,7 +2108,7 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         completionHandler: @escaping () -> Void
     ) {
         let alert = NSAlert()
-        alert.messageText = tab.title
+        alert.messageText = currentDialogTitle
         alert.informativeText = message
         alert.addButton(withTitle: L10n.close)
         alert.runModal()
@@ -2052,7 +2122,7 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         completionHandler: @escaping (Bool) -> Void
     ) {
         let alert = NSAlert()
-        alert.messageText = tab.title
+        alert.messageText = currentDialogTitle
         alert.informativeText = message
         alert.addButton(withTitle: L10n.s("Đồng ý", "OK"))
         alert.addButton(withTitle: L10n.cancel)
@@ -2067,7 +2137,7 @@ private final class InAppTabWebController: NSObject, WKNavigationDelegate, WKUID
         completionHandler: @escaping (String?) -> Void
     ) {
         let alert = NSAlert()
-        alert.messageText = tab.title
+        alert.messageText = currentDialogTitle
         alert.informativeText = prompt
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         input.stringValue = defaultText ?? ""

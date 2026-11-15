@@ -58,7 +58,6 @@ final class WorkspaceStore: ObservableObject {
     @Published var inAppTabs: [InAppBrowserTab] = []
     @Published var activeInAppTabID: UUID? = nil
     @Published var isInAppBrowserVisible: Bool = false
-    @Published var inAppAddressBarText: String = ""
 
     // UI Sheets & Overlays
     @Published var isDownloadsPopoverShown: Bool = false
@@ -452,14 +451,31 @@ final class WorkspaceStore: ObservableObject {
         if secondarySplitInstanceID == id {
             secondarySplitInstanceID = nil
         }
-        // Sync In-App Browser visibility to whether this instance has open in-app tabs
-        let tabsForInstance = inAppTabs.filter { $0.ownerInstanceID == id }
+        syncInAppBrowserSelection(forInstanceID: id)
+    }
+
+    private func syncInAppBrowserSelection(forInstanceID instanceID: UUID?) {
+        guard let instanceID else {
+            if activeInAppTabID != nil {
+                activeInAppTabID = nil
+            }
+            if isInAppBrowserVisible {
+                isInAppBrowserVisible = false
+            }
+            return
+        }
+        let tabsForInstance = inAppTabs.filter { $0.ownerInstanceID == instanceID }
         if let lastTab = tabsForInstance.last {
-            if activeInAppTabID != lastTab.id {
+            if activeInAppTabID == nil || !tabsForInstance.contains(where: { $0.id == activeInAppTabID }) {
                 activeInAppTabID = lastTab.id
             }
-        } else if isInAppBrowserVisible {
-            isInAppBrowserVisible = false
+        } else {
+            if activeInAppTabID != nil {
+                activeInAppTabID = nil
+            }
+            if isInAppBrowserVisible {
+                isInAppBrowserVisible = false
+            }
         }
     }
 
@@ -596,7 +612,14 @@ final class WorkspaceStore: ObservableObject {
         guard let idx = indexOfInstance(id) else { return }
         let removed = instances.remove(at: idx)
         InstanceIconStore.removeIcon(for: id)
-        inAppTabs.removeAll { $0.ownerInstanceID == id }
+
+        let ownedTabIDs = inAppTabs.filter { $0.ownerInstanceID == id }.map(\.id)
+        for tabID in ownedTabIDs {
+            WebSessionManager.shared.destroyInAppTabWebView(tabID: tabID)
+        }
+        if !ownedTabIDs.isEmpty {
+            inAppTabs.removeAll { $0.ownerInstanceID == id }
+        }
 
         let otherSharingSameProfile = instances.contains { $0.profileID == removed.profileID }
         if !otherSharingSameProfile {
@@ -611,7 +634,9 @@ final class WorkspaceStore: ObservableObject {
             secondarySplitInstanceID = nil
         }
         if activeInstanceID == id {
-            activeInstanceID = filteredInstances.first?.id ?? instances.first?.id
+            let nextActiveID = filteredInstances.first?.id ?? instances.first?.id
+            activeInstanceID = nextActiveID
+            syncInAppBrowserSelection(forInstanceID: nextActiveID)
         }
         save()
         showToast("Đã xoá \(removed.displayTitle)")
@@ -816,9 +841,9 @@ final class WorkspaceStore: ObservableObject {
             profileID: sharedProfileID,
             initialURL: url
         )
+        WebSessionManager.shared.runtime(forTab: tab)
         inAppTabs.append(tab)
         activeInAppTabID = tab.id
-        inAppAddressBarText = url.absoluteString
         isInAppBrowserVisible = true
         pendingLinkPrompt = nil
     }
@@ -830,7 +855,7 @@ final class WorkspaceStore: ObservableObject {
         if remaining.isEmpty {
             activeInAppTabID = nil
             isInAppBrowserVisible = false
-        } else if activeInAppTabID == tabID {
+        } else if activeInAppTabID == tabID || !remaining.contains(where: { $0.id == activeInAppTabID }) {
             activeInAppTabID = remaining.last?.id
         }
     }
@@ -844,38 +869,6 @@ final class WorkspaceStore: ObservableObject {
         inAppTabs.removeAll { $0.ownerInstanceID == activeID }
         activeInAppTabID = nil
         isInAppBrowserVisible = false
-    }
-
-    func updateInAppTabState(
-        tabID: UUID,
-        url: URL?,
-        title: String?,
-        isLoading: Bool?,
-        progress: Double?,
-        canGoBack: Bool?,
-        canGoForward: Bool?
-    ) {
-        guard let idx = inAppTabs.firstIndex(where: { $0.id == tabID }) else { return }
-        var updated = inAppTabs[idx]
-        if let url {
-            updated.currentURL = url
-            if activeInAppTab?.id == tabID, inAppAddressBarText != url.absoluteString {
-                inAppAddressBarText = url.absoluteString
-            }
-        }
-        if let title {
-            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                updated.title = trimmed
-            }
-        }
-        if let isLoading { updated.isLoading = isLoading }
-        if let progress { updated.estimatedProgress = progress }
-        if let canGoBack { updated.canGoBack = canGoBack }
-        if let canGoForward { updated.canGoForward = canGoForward }
-
-        guard updated != inAppTabs[idx] else { return }
-        inAppTabs[idx] = updated
     }
 
     // MARK: - Dedicated .app Export Helper

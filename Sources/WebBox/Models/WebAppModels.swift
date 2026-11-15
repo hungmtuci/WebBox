@@ -605,12 +605,7 @@ struct InAppBrowserTab: Identifiable, Equatable {
     let id: UUID
     let ownerInstanceID: UUID
     let profileID: UUID?
-    var currentURL: URL
-    var title: String
-    var isLoading: Bool
-    var estimatedProgress: Double
-    var canGoBack: Bool
-    var canGoForward: Bool
+    let initialURL: URL
 
     init(
         id: UUID = UUID(),
@@ -621,12 +616,7 @@ struct InAppBrowserTab: Identifiable, Equatable {
         self.id = id
         self.ownerInstanceID = ownerInstanceID
         self.profileID = profileID
-        self.currentURL = initialURL
-        self.title = initialURL.host ?? initialURL.absoluteString
-        self.isLoading = true
-        self.estimatedProgress = 0.1
-        self.canGoBack = false
-        self.canGoForward = false
+        self.initialURL = initialURL
     }
 }
 

@@ -15,36 +15,23 @@ struct InAppBrowserPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 1. Multi-tab strip
+            // 1. Multi-tab strip (structural container; each tab chip observes only its own runtime)
             tabStripBar
 
             Divider()
 
-            // 2. Navigation & External Handoff Toolbar
+            // 2. Navigation & External Handoff Toolbar + WebView content
             if let tab = currentTab {
-                navigationToolbar(for: tab)
+                InAppNavigationToolbarView(tab: tab)
                 Divider()
 
-                // 3. Loading progress indicator
+                // 3. Hosted WebView + isolated loading progress indicator
                 ZStack(alignment: .top) {
                     HostedWebViewContainer(webView: sessionManager.inAppWebView(for: tab))
                         .id(tab.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    if tab.isLoading {
-                        GeometryReader { geo in
-                            Rectangle()
-                                .fill(Color.accentColor)
-                                .frame(
-                                    width: max(20, geo.size.width * max(0.08, tab.estimatedProgress)),
-                                    height: 2.5
-                                )
-                        }
-                        .frame(height: 2.5)
-                    }
-                }
-                .onAppear {
-                    store.inAppAddressBarText = tab.currentURL.absoluteString
+                    InAppTabLoadingBarView(tab: tab)
                 }
             } else {
                 ContentUnavailableView(
@@ -59,7 +46,8 @@ struct InAppBrowserPaneView: View {
     }
 
     private var tabStripBar: some View {
-        HStack(spacing: 6) {
+        let selectedTabID = currentTab?.id
+        return HStack(spacing: 6) {
             Image(systemName: "globe.asia.australia.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.blue)
@@ -68,49 +56,16 @@ struct InAppBrowserPaneView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(tabs) { tab in
-                        let isSelected = tab.id == currentTab?.id
-                        HStack(spacing: 6) {
-                            if tab.isLoading {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                    .scaleEffect(0.75)
-                            } else {
-                                Image(systemName: "doc.richtext")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Text(tab.title)
-                                .font(.caption.weight(isSelected ? .semibold : .regular))
-                                .lineLimit(1)
-                                .frame(maxWidth: 165, alignment: .leading)
-
-                            Button {
+                        InAppTabStripItemView(
+                            tab: tab,
+                            isSelected: tab.id == selectedTabID,
+                            onSelect: {
+                                store.activeInAppTabID = tab.id
+                            },
+                            onClose: {
                                 store.closeInAppTab(tab.id)
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(3)
-                                    .contentShape(Circle())
                             }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.04))
                         )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .strokeBorder(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            store.activeInAppTabID = tab.id
-                            store.inAppAddressBarText = tab.currentURL.absoluteString
-                        }
                     }
 
                     // New blank search tab button
@@ -171,8 +126,87 @@ struct InAppBrowserPaneView: View {
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
     }
+}
 
-    private func navigationToolbar(for tab: InAppBrowserTab) -> some View {
+// MARK: - Scoped Subviews Observing Only Their Own Tab Runtime Model
+
+private struct InAppTabStripItemView: View {
+    let tab: InAppBrowserTab
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let runtime = sessionManager.runtime(forTab: tab)
+
+        HStack(spacing: 6) {
+            if runtime.isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.75)
+            } else {
+                Image(systemName: "doc.richtext")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(runtime.title)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .frame(maxWidth: 165, alignment: .leading)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(3)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+    }
+}
+
+@MainActor
+@Observable
+private final class InAppAddressBarModel {
+    static let shared = InAppAddressBarModel()
+    var text: String = ""
+    @ObservationIgnored var activeTabID: UUID?
+}
+
+private struct InAppNavigationToolbarView: View {
+    let tab: InAppBrowserTab
+    private let store = WorkspaceStore.shared
+    private let sessionManager = WebSessionManager.shared
+    private let addressBar = InAppAddressBarModel.shared
+
+    @FocusState private var isAddressFieldFocused: Bool
+
+    private var addressTextBinding: Binding<String> {
+        Binding(
+            get: { addressBar.text },
+            set: { addressBar.text = $0 }
+        )
+    }
+
+    var body: some View {
+        let runtime = sessionManager.runtime(forTab: tab)
+        let currentURL = runtime.url
+
         HStack(spacing: 6) {
             Button {
                 sessionManager.goBackInAppTab(tabID: tab.id)
@@ -181,7 +215,7 @@ struct InAppBrowserPaneView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(!tab.canGoBack)
+            .disabled(!runtime.canGoBack)
 
             Button {
                 sessionManager.goForwardInAppTab(tabID: tab.id)
@@ -190,7 +224,7 @@ struct InAppBrowserPaneView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(!tab.canGoForward)
+            .disabled(!runtime.canGoForward)
 
             Button {
                 sessionManager.reloadInAppTab(tabID: tab.id)
@@ -202,20 +236,21 @@ struct InAppBrowserPaneView: View {
 
             // Address / Search Field
             HStack(spacing: 6) {
-                Image(systemName: tab.currentURL.scheme == "https" ? "lock.fill" : "globe")
+                Image(systemName: currentURL.scheme == "https" ? "lock.fill" : "globe")
                     .font(.caption2)
-                    .foregroundStyle(tab.currentURL.scheme == "https" ? .green : .secondary)
+                    .foregroundStyle(currentURL.scheme == "https" ? .green : .secondary)
 
-                TextField(L10n.inAppAddressPlaceholder, text: $store.inAppAddressBarText)
+                TextField(L10n.inAppAddressPlaceholder, text: addressTextBinding)
+                    .focused($isAddressFieldFocused)
                     .textFieldStyle(.plain)
                     .font(.system(.caption, design: .monospaced))
                     .onSubmit {
-                        submitAddressBar(for: tab)
+                        submitAddressBar()
                     }
 
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(tab.currentURL.absoluteString, forType: .string)
+                    NSPasteboard.general.setString(currentURL.absoluteString, forType: .string)
                     store.showToast(L10n.inAppCopiedURL)
                 } label: {
                     Image(systemName: "doc.on.doc")
@@ -241,7 +276,7 @@ struct InAppBrowserPaneView: View {
                 let defaultName = LinkRouter.defaultSystemBrowserName()
                 Button {
                     let pref = store.instance(for: tab.ownerInstanceID)?.preferredExternalBrowserBundleID
-                    LinkRouter.openInExternalBrowser(tab.currentURL, preferredBrowserBundleID: pref)
+                    LinkRouter.openInExternalBrowser(currentURL, preferredBrowserBundleID: pref)
                 } label: {
                     Label(L10n.inAppOpenExternalDefault(defaultName), systemImage: "safari")
                 }
@@ -251,7 +286,7 @@ struct InAppBrowserPaneView: View {
                     Divider()
                     ForEach(browsers) { browser in
                         Button {
-                            LinkRouter.openInExternalBrowser(tab.currentURL, preferredBrowserBundleID: browser.bundleIdentifier)
+                            LinkRouter.openInExternalBrowser(currentURL, preferredBrowserBundleID: browser.bundleIdentifier)
                         } label: {
                             Text(L10n.inAppOpenWithBrowser(browser.name))
                         }
@@ -262,7 +297,7 @@ struct InAppBrowserPaneView: View {
                     .font(.caption.weight(.semibold))
             } primaryAction: {
                 let pref = store.instance(for: tab.ownerInstanceID)?.preferredExternalBrowserBundleID
-                LinkRouter.openInExternalBrowser(tab.currentURL, preferredBrowserBundleID: pref)
+                LinkRouter.openInExternalBrowser(currentURL, preferredBrowserBundleID: pref)
             }
             .menuStyle(.borderedButton)
             .controlSize(.small)
@@ -270,10 +305,29 @@ struct InAppBrowserPaneView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
+        .onAppear {
+            if addressBar.activeTabID != tab.id {
+                addressBar.activeTabID = tab.id
+                addressBar.text = currentURL.absoluteString
+            } else if !isAddressFieldFocused && addressBar.text != currentURL.absoluteString {
+                addressBar.text = currentURL.absoluteString
+            }
+        }
+        .onChange(of: tab.id) { _, _ in
+            isAddressFieldFocused = false
+            addressBar.activeTabID = tab.id
+            addressBar.text = sessionManager.runtime(forTab: tab).url.absoluteString
+        }
+        .onChange(of: currentURL) { _, newURL in
+            if !isAddressFieldFocused {
+                addressBar.activeTabID = tab.id
+                addressBar.text = newURL.absoluteString
+            }
+        }
     }
 
-    private func submitAddressBar(for tab: InAppBrowserTab) {
-        let raw = store.inAppAddressBarText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitAddressBar() {
+        let raw = addressBar.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
 
         let targetURL: URL?
@@ -285,8 +339,30 @@ struct InAppBrowserPaneView: View {
         }
 
         if let url = targetURL {
-            store.inAppAddressBarText = url.absoluteString
+            isAddressFieldFocused = false
+            addressBar.activeTabID = tab.id
+            addressBar.text = url.absoluteString
             sessionManager.navigateInAppTab(tabID: tab.id, to: url)
+        }
+    }
+}
+
+private struct InAppTabLoadingBarView: View {
+    let tab: InAppBrowserTab
+    private let sessionManager = WebSessionManager.shared
+
+    var body: some View {
+        let runtime = sessionManager.runtime(forTab: tab)
+        if runtime.isLoading {
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(
+                        width: max(20, geo.size.width * max(0.08, runtime.estimatedProgress)),
+                        height: 2.5
+                    )
+            }
+            .frame(height: 2.5)
         }
     }
 }
